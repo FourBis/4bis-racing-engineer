@@ -27,10 +27,17 @@ class _Lap:
     start_time_s: float | None = None
     end_time_s: float | None = None
     run_number: int = 0
+    end_incidents: int | None = None
 
     @property
     def complete(self) -> bool:
         return self.start_boundary and self.end_boundary
+
+    @property
+    def incident_counts(self) -> list[int | None]:
+        # Include the crossing tick without adding the next lap's progress to traces.
+        counts = [sample.incidents for sample in self.samples]
+        return counts + [self.end_incidents] if self.end_boundary else counts
 
 
 def _finite(value: float | int | None) -> bool:
@@ -80,6 +87,7 @@ def _lap_groups(samples: Iterable[Sample]) -> list[_Lap]:
             observed = 0 < dt <= _MAX_GAP_S
             lap.end_time_s = crossed_at
             lap.end_boundary = observed
+            lap.end_incidents = sample.incidents if observed else None
             result.append(lap)
             lap = new_lap(key, sample, at_boundary=observed, start_time_s=crossed_at)
         elif lap is None:
@@ -148,7 +156,7 @@ def _comparison_gate(lap: _Lap) -> tuple[bool, str]:
         return False, "daño desconocido o distinto de sano"
     if any(s.traffic != "clear" for s in lap.samples):
         return False, "tráfico desconocido o no despejado"
-    incidents = [s.incidents for s in lap.samples]
+    incidents = lap.incident_counts
     if any(value is None for value in incidents):
         return False, "contador de incidentes desconocido"
     if any(value != 0 for value in incidents):

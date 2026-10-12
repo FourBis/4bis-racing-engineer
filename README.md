@@ -116,7 +116,7 @@ telemetría ni se modifican ajustes del juego o automatiza conducción. Sin APIs
 La aprobación de la suite no acredita utilidad en pista ni audibilidad.
 Para desarrollar la interfaz, ejecutar también `node --test tests/dashboard.test.cjs`
 con Node.js; usa su runner nativo y no requiere instalar paquetes.
-En Python 3.15 se verificaron 118 tests y demo/replay con 901 muestras;
+En Python 3.15 se verificaron 121 tests y demo/replay con 901 muestras;
 las regresiones de interfaz usan 10 tests nativos de Node.js.
 El SDK inició limpio pero sin simulador conectado (0 muestras); SAPI indicó
 `ready`, lo que no confirma audio oído ni validación conduciendo.

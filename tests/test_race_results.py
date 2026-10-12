@@ -24,6 +24,25 @@ def session(*, count=3, session_id="race", loss_lap=None, loss_segment=7):
 
 
 class RaceResultsTests(unittest.TestCase):
+    def test_incident_on_finish_tick_prevents_previous_lap_reference(self):
+        samples = [replace(s, incidents=6 if s.lap >= 2 else 4)
+                   for s in session(count=3, loss_lap=2)]
+        result = race_results(samples)
+        first = result["laps"][0]
+        self.assertTrue(first["review_eligible"])
+        self.assertEqual(first["metrics"]["incidents_delta"], 2)
+        self.assertNotEqual(result["best"]["lap"], 1)
+        self.assertEqual(result["laps"][1]["metrics"]["incidents_delta"], 0)
+
+    def test_missing_or_reset_counter_at_crossing_is_not_a_clean_reference(self):
+        for counter in (None, 1):
+            with self.subTest(counter=counter):
+                samples = session(count=3, loss_lap=2)
+                samples[200] = replace(samples[200], incidents=counter)
+                result = race_results(samples)
+                self.assertIsNone(result["laps"][0]["metrics"]["incidents_delta"])
+                self.assertNotEqual(result["best"]["lap"], 1)
+
     def test_error_lap_remains_eligible_but_pits_and_stop_are_excluded(self):
         samples = session(count=4, loss_lap=2)
         for i, sample in enumerate(samples):
@@ -33,6 +52,7 @@ class RaceResultsTests(unittest.TestCase):
                 samples[i] = replace(sample, speed_mps=0)
             elif sample.lap == 2 and i % 200 >= 80:
                 samples[i] = replace(sample, incidents=6, damage="damaged")
+        samples = [replace(s, incidents=6) if s.lap >= 3 else s for s in samples]
         result = race_results(samples)
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["best"]["lap"], 4)

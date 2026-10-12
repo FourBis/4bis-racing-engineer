@@ -61,7 +61,8 @@ def _reason(lap, identity, latest_run):
     return ""
 
 
-def _context(samples):
+def _context(lap):
+    samples = lap.samples
     result = []
     labels = {"healthy": "sano", "damaged": "con daño", "unknown": "desconocido",
               "clear": "despejado", "traffic": "tráfico"}
@@ -71,7 +72,7 @@ def _context(samples):
         result.append("Canal de boxes desconocido en parte o toda la vuelta.")
     if any(getattr(s, name) is None for s in samples for name in ("car_id", "track_id", "track_config")):
         result.append("Identidad de auto, pista o layout parcialmente desconocida.")
-    incidents = [s.incidents for s in samples]
+    incidents = lap.incident_counts
     delta = incidents[-1] - incidents[0] if all(n is not None for n in incidents) else None
     if delta is None:
         result.append("Contador de incidentes desconocido.")
@@ -170,7 +171,7 @@ def race_results(samples, review_lap_id=None):
     eligible = []
     for lap in groups:
         reason = _reason(lap, identity, latest_run)
-        context, incident_delta = _context(lap.samples)
+        context, incident_delta = _context(lap)
         labels = Counter(s.lap for s in lap.samples if s.lap is not None).most_common(1)
         row = {"id": lap.id, "lap": labels[0][0] if labels else None,
                "duration_s": lap.end_time_s - lap.start_time_s,
