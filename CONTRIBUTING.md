@@ -21,3 +21,6 @@ tests normales usan token de lectura y datos sintéticos, sin SDK ni evidencia p
 
 Antes de proponer cambios: `python check.py`. Nunca incluir fotos, videos,
 telemetría real, informes de sesiones, credenciales o contexto de conversaciones.
+
+Configuración remota: [integración por el propietario](https://github.com/FourBis/4bis-racing-engineer/rules/24903511)
+y [historial, PR y checks obligatorios](https://github.com/FourBis/4bis-racing-engineer/rules/24903518).
