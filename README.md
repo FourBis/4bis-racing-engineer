@@ -47,6 +47,12 @@ Si una base tiene varias capturas, replay solicita `--recording-id ID`.
 
 ## Funciones y límites
 
+- **En pista:** próxima curva identificada, indicación de frenada observada,
+  delta y pedales grandes. **Análisis:** comparación, trazas, rebotes e historial
+  de voz. Grabación y voz permanecen accesibles en ambas vistas.
+- El comparador muestra solo vueltas completas elegibles con tiempo positivo;
+  los segmentos excluidos se conservan en el informe. Los pedales sin lectura
+  aparecen como `—`, sin convertirlos en cero.
 - Trazas de freno, acelerador, dirección y velocidad; muestras con unidades,
   valores ausentes y procedencia. Grabación optativa y replay de solo lectura.
 - Separación de vueltas, comparación por progreso y hallazgos con evidencia.
@@ -85,6 +91,8 @@ reales, informes de sesiones y contexto privado quedan fuera de Git. No se enví
 telemetría ni se modifican ajustes del juego o automatiza conducción. Sin APIs de IA.
 
 La aprobación de la suite no acredita utilidad en pista ni audibilidad.
+Para desarrollar la interfaz, ejecutar también `node --test tests/dashboard.test.cjs`
+con Node.js; usa su runner nativo y no requiere instalar paquetes.
 En Python 3.15 se verificaron 99 tests, demo/replay con 901 muestras y `pip check`.
 El SDK inició limpio pero sin simulador conectado (0 muestras); SAPI indicó
 `ready`, lo que no confirma audio oído ni validación conduciendo.
