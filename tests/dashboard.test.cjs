@@ -11,7 +11,7 @@ assert.ok(script, 'dashboard.html debe contener su script inline');
 class Element {
   constructor(id = '') {
     this.id = id;
-    this.tagName = ({ liveView: 'BUTTON', analysisView: 'BUTTON', first: 'SELECT', second: 'SELECT' })[id] || id.toUpperCase();
+    this.tagName = ({ liveView: 'BUTTON', analysisView: 'BUTTON', first: 'SELECT', second: 'SELECT', raceLap: 'SELECT', raceChannel: 'SELECT' })[id] || id.toUpperCase();
     this.attributes = {};
     this.children = [];
     this.hidden = false;
@@ -56,11 +56,12 @@ function loadDashboard() {
   const elements = new Map();
   const getElementById = id => {
     if (!elements.has(id)) elements.set(id, new Element(id));
-    if (id === 'legendB' && !elements.get(id).parentElement) elements.get(id).parentElement = new Element('legendParent');
+    if (['legendB', 'raceLegendB'].includes(id) && !elements.get(id).parentElement) elements.get(id).parentElement = new Element(id + 'Parent');
     return elements.get(id);
   };
   let fetchCalls = 0;
   let fetchResponse = null;
+  const fetchUrls = [];
   const context = {
     document: {
       getElementById,
@@ -68,8 +69,9 @@ function loadDashboard() {
       createElement: tag => new Element(tag),
       createElementNS: (_namespace, tag) => new Element(tag),
     },
-    fetch: () => {
+    fetch: url => {
       fetchCalls += 1;
+      fetchUrls.push(String(url));
       if (fetchResponse) return Promise.resolve({ ok: true, json: () => Promise.resolve(fetchResponse) });
       throw new Error('fetch inesperado en la prueba');
     },
@@ -87,11 +89,12 @@ function loadDashboard() {
   };
   // Solo se omite el polling inicial, para que evaluar el script no haga requests.
   const withoutInitialPoll = script.replace(/\bpoll\(\);\s*$/, '');
-  vm.runInNewContext(`${withoutInitialPoll}\nglobalThis.__dashboard = { pedalReading, selectComparableLaps, renderLaps, renderFindings, drawCompare, setView, renderDriving };`, context);
+  vm.runInNewContext(`${withoutInitialPoll}\nglobalThis.__dashboard = { pedalReading, selectComparableLaps, renderLaps, renderFindings, renderRaceResults, drawCompare, setView, renderDriving };`, context);
   return {
     dashboard: context.__dashboard,
     get: getElementById,
     fetchCalls: () => fetchCalls,
+    fetchUrls,
     setFetchResponse: value => { fetchResponse = value; },
   };
 }
@@ -237,4 +240,82 @@ test('drawCompare mantiene escala pedal de 0 a 100 y los selectores invalidan el
     get('second').onchange?.();
     assert.equal(get('compareChart').children.length, 0);
   }
+});
+
+test('renderRaceResults representa estado insuficiente y canales nulos sin inventar ceros', () => {
+  const { dashboard, get } = loadDashboard();
+  dashboard.renderRaceResults({
+    session_id: 'session-1', status: 'insufficient',
+    laps: [{ id: 'unknown', lap: 4, duration_s: null, review_eligible: false, exclusion_reason: 'incompleta' }],
+    best: null, worst: null, delta_s: null, segments: [],
+    comparison: { status: 'insufficient', points: [] }, limitations: ['Faltan vueltas analizables.'],
+  });
+
+  assert.equal(get('raceBest').textContent, '—');
+  assert.equal(get('raceWorst').textContent, '—');
+  assert.equal(get('raceGap').textContent, '—');
+  assert.match(get('raceAvailability').textContent, /0 vueltas analizables/);
+  assert.equal(get('raceLap').options.length, 1);
+  assert.equal(get('raceLaps').children[0].children[1].textContent, '—');
+  assert.match(get('raceLaps').children[0].children[3].textContent, /incompleta/);
+  assert.match(get('raceStatus').textContent, /Sin comparación suficiente/);
+});
+
+test('renderRaceResults ofrece vueltas elegibles salvo la referencia y mantiene la selección manual entre polls', async () => {
+  const { dashboard, get, setFetchResponse, fetchUrls } = loadDashboard();
+  const automatic = {
+    session_id: 'session-1', status: 'ok', selection: 'automatic',
+    laps: [
+      { id: 'best', lap: 1, duration_s: 90, review_eligible: true, context: [] },
+      { id: 'slow', lap: 2, duration_s: 92, review_eligible: true, context: [] },
+      { id: 'pit', lap: 3, duration_s: 96, review_eligible: false, exclusion_reason: 'paso por boxes', context: [] },
+      { id: 'middle', lap: 4, duration_s: 91, review_eligible: true, context: [] },
+    ],
+    best: { id: 'best', lap: 1, duration_s: 90 },
+    worst: { id: 'slow', lap: 2, duration_s: 92 }, delta_s: 2,
+    segments: [], comparison: { status: 'insufficient', points: [] }, limitations: [],
+  };
+  dashboard.renderRaceResults(automatic);
+  assert.deepEqual(get('raceLap').options.map(option => option.value), ['', 'slow', 'middle']);
+
+  get('raceLap').value = 'middle';
+  setFetchResponse({
+    ...automatic, selection: 'manual',
+    worst: { id: 'middle', lap: 4, duration_s: 91 }, delta_s: 1,
+  });
+  await get('raceLap').onchange();
+  assert.equal(fetchUrls.at(-1), '/api/race-results.json?lap=middle');
+  assert.equal(get('raceWorst').textContent, 'Vuelta 4 · 1:31.000');
+  assert.equal(get('raceLap').value, 'middle');
+
+  dashboard.renderRaceResults(automatic); // actualización periódica de /api/state
+  assert.equal(get('raceWorst').textContent, 'Vuelta 4 · 1:31.000');
+  assert.equal(get('raceLap').value, 'middle');
+
+  dashboard.renderRaceResults({ ...automatic, session_id: 'session-2', worst: { id: 'slow', lap: 2, duration_s: 93 } });
+  assert.equal(get('raceWorst').textContent, 'Vuelta 2 · 1:33.000');
+  assert.equal(get('raceLap').value, '');
+});
+
+test('drawCompare con namespace race no modifica el gráfico legacy', () => {
+  const { dashboard, get } = loadDashboard();
+  const legacyChart = get('compareChart');
+  const legacyPath = new Element('path');
+  legacyChart.append(legacyPath);
+  get('legendA').textContent = 'A anterior';
+  get('legendB').parentElement.hidden = true;
+  get('compareStatus').textContent = 'comparación previa';
+  get('raceChannel').value = 'delta_s';
+
+  dashboard.drawCompare({ status: 'ok', points: [
+    { progress_pct: 25, delta_s: 1 },
+    { progress_pct: 50, delta_s: 2 },
+  ] }, 'race');
+
+  assert.equal(legacyChart.children.length, 1);
+  assert.equal(legacyChart.children[0], legacyPath);
+  assert.equal(get('legendA').textContent, 'A anterior');
+  assert.equal(get('legendB').parentElement.hidden, true);
+  assert.equal(get('compareStatus').textContent, 'comparación previa');
+  assert.ok(get('raceChart').children.length > 0);
 });

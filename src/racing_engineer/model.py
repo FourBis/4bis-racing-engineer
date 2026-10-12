@@ -34,6 +34,7 @@ class Sample:
     track_length_m: float | None = None
     car_id: int | None = None
     car_name: str | None = None
+    on_pit_road: bool | None = None
 
     def __post_init__(self):
         if self.source not in ("demo", "iracing"):
@@ -44,7 +45,7 @@ class Sample:
             raise ValueError("Estado de daño inválido")
         if self.traffic not in ("clear", "traffic", "unknown"):
             raise ValueError("Estado de tráfico inválido")
-        for name in ("on_track", "is_replay", "abs_active"):
+        for name in ("on_track", "is_replay", "abs_active", "on_pit_road"):
             if getattr(self, name) is not None and type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} debe ser booleano o null")
         for name, lower, upper in (("lap", 0, 100000), ("gear", -1, 20), ("incidents", 0, 100000)):

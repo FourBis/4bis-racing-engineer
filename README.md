@@ -86,6 +86,29 @@ No se prometen mejoras de tiempo.
 
 ## Privacidad y desarrollo
 
+### Balance al terminar una tanda
+
+En **Análisis → Balance de vueltas**, el panel compara la referencia más rápida
+sin nuevos incidentes con la vuelta completa más lenta analizable. También permite
+seleccionar otra vuelta: muestra diferencia de tiempo, trazas por progreso y los
+tres tramos con mayor pérdida, junto con velocidad, gas, freno y tiempo con ABS.
+El JSON del balance y el informe Markdown incluyen los motivos de exclusión.
+
+Se conserva la vuelta con errores para poder revisarla. Se excluyen vueltas
+incompletas, replay, datos discontinuos, detenciones sostenidas y pasos por boxes
+reportados por `OnPitRoad`. Grabaciones antiguas sin ese canal pueden contener un
+paso por boxes en movimiento no identificable; el panel lo advierte. Daño y tráfico
+desconocidos permiten una revisión descriptiva, sin asumir condiciones limpias.
+Una referencia con daño explícito se descarta. Este balance es independiente del
+comparador estricto, que conserva sus criterios originales.
+
+El balance usa el último bloque de sesión y la misma identidad de auto/pista/layout.
+Las pérdidas se ubican en tramos del 5% de vuelta, todavía sin asignación a curvas.
+ABS o un cambio de pedal no prueban bloqueo, patinaje ni la causa del tiempo perdido.
+La selección manual queda fijada hasta volver a Automática o cambiar de sesión.
+
+### Desarrollo local
+
 Solo código, tests sintéticos y documentación técnica. Fotos, videos, grabaciones
 reales, informes de sesiones y contexto privado quedan fuera de Git. No se envía
 telemetría ni se modifican ajustes del juego o automatiza conducción. Sin APIs de IA.
@@ -93,7 +116,8 @@ telemetría ni se modifican ajustes del juego o automatiza conducción. Sin APIs
 La aprobación de la suite no acredita utilidad en pista ni audibilidad.
 Para desarrollar la interfaz, ejecutar también `node --test tests/dashboard.test.cjs`
 con Node.js; usa su runner nativo y no requiere instalar paquetes.
-En Python 3.15 se verificaron 99 tests, demo/replay con 901 muestras y `pip check`.
+En Python 3.15 se verificaron 118 tests y demo/replay con 901 muestras;
+las regresiones de interfaz usan 10 tests nativos de Node.js.
 El SDK inició limpio pero sin simulador conectado (0 muestras); SAPI indicó
 `ready`, lo que no confirma audio oído ni validación conduciendo.
 Ver [arquitectura](docs/ARCHITECTURE.md), [canales SDK](docs/SDK_CHANNELS.md),

@@ -424,6 +424,22 @@ def report_markdown(summary: dict) -> str:
     if annotations:
         lines.append(f"Anotaciones del operador: {annotations}")
         lines.append("")
+    balance = summary.get("race_results")
+    if balance:
+        lines.extend(["## Balance de vueltas", "Comparación descriptiva; tiempos derivados, no oficiales."])
+        if balance.get("status") == "ok":
+            best, other = balance["best"], balance["worst"]
+            lines.extend([
+                f"Referencia: vuelta {best['lap']}, {best['duration_s']:.3f} s.",
+                f"Revisión: vuelta {other['lap']}, {other['duration_s']:.3f} s; diferencia {balance['delta_s']:+.3f} s.",
+            ])
+            for segment in balance.get("segments", []):
+                lines.append(f"- Tramo {segment['start_pct']:.0f}–{segment['end_pct']:.0f}%: "
+                             f"{segment['delta_s']:+.3f} s. Revisar trazas de velocidad y pedales en el panel.")
+        for row in balance.get("laps", []):
+            state = "analizable" if row["review_eligible"] else f"excluida: {row['exclusion_reason']}"
+            lines.append(f"- Vuelta {row['lap']}: {state}. {' '.join(row['context'])}")
+        lines.extend([*balance.get("limitations", []), "", "## Comparación estricta", ""])
     for lap in laps:
         duration = lap.get("duration_s")
         derived = f"duración derivada {duration:.2f} s (no oficial)" if duration is not None else "duración no disponible"

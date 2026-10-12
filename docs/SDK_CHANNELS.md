@@ -34,6 +34,7 @@ cancelar la muestra.
 | `LapCurrentLapTime` | s | estimación del tiempo de vuelta actual | `None` |
 | `PlayerCarMyIncidentCount` | conteo | incidentes propios de la sesión | `None` |
 | `IsOnTrack` | booleano | física de pista activa con jugador en el auto | `None` |
+| `OnPitRoad` | booleano | auto en el carril de boxes entre los conos; excluye esa vuelta del balance | `None` |
 | `IsReplayPlaying` | booleano | reproducción activa | `None` |
 
 Identidad de sesión: `WeekendInfo.SessionID` y `WeekendInfo.SubSessionID`,
@@ -60,5 +61,9 @@ física del pedal. El adaptador no solicita ni envía comandos broadcast.
 
 `dcABS` y `dcTractionControl` son ajustes, no indicadores de intervención.
 El adaptador no usa una bandera de TC activo, por lo que no anuncia patinaje.
+`OnPitRoad` se verificó en el índice de variables de pyirsdk; también se valida
+su encabezado y tipo al conectar. Las grabaciones anteriores conservan `None`:
+en ellas una parada sostenida se identifica como detención, no como boxes
+confirmados. Una pasada por boxes sin detenerse puede no ser identificable.
 Las grabaciones v1 anteriores siguen siendo legibles: los campos opcionales nuevos
 son `None` cuando no estaban guardados; no se rellenan con ceros.
