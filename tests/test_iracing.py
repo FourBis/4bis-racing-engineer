@@ -101,6 +101,21 @@ class IRacingSourceTests(unittest.TestCase):
         self.assertEqual(119, sample.car_id)
         self.assertEqual("Porsche 718 Cayman GT4", sample.car_name)
 
+    def test_pit_road_is_nullable_boolean_and_unit_checked(self):
+        self.assertIsNone(self.source.read().on_pit_road)
+        self.sdk.var_headers_names.append("OnPitRoad")
+        self.sdk.values["OnPitRoad"] = True
+        self.sdk._var_headers_dict["OnPitRoad"] = SimpleNamespace(unit="", desc="On pit road")
+        self.sdk.tick += 1
+        self.assertTrue(self.source.read().on_pit_road)
+        self.sdk.values["OnPitRoad"] = "true"
+        self.sdk.tick += 1
+        self.assertIsNone(self.source.read().on_pit_road)
+        self.sdk.values["OnPitRoad"] = False
+        self.sdk._var_headers_dict["OnPitRoad"].unit = "m"
+        self.sdk.tick += 1
+        self.assertIsNone(self.source.read().on_pit_road)
+
     def test_uses_driver_car_index_fallback_without_selecting_first_driver(self):
         self.sdk.values.pop("PlayerCarIdx")
         self.sdk.values["DriverInfo"]["DriverCarIdx"] = 2

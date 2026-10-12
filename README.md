@@ -47,6 +47,12 @@ Si una base tiene varias capturas, replay solicita `--recording-id ID`.
 
 ## Funciones y límites
 
+- **En pista:** próxima curva identificada, indicación de frenada observada,
+  delta y pedales grandes. **Análisis:** comparación, trazas, rebotes e historial
+  de voz. Grabación y voz permanecen accesibles en ambas vistas.
+- El comparador muestra solo vueltas completas elegibles con tiempo positivo;
+  los segmentos excluidos se conservan en el informe. Los pedales sin lectura
+  aparecen como `—`, sin convertirlos en cero.
 - Trazas de freno, acelerador, dirección y velocidad; muestras con unidades,
   valores ausentes y procedencia. Grabación optativa y replay de solo lectura.
 - Separación de vueltas, comparación por progreso y hallazgos con evidencia.
@@ -80,12 +86,38 @@ No se prometen mejoras de tiempo.
 
 ## Privacidad y desarrollo
 
+### Balance al terminar una tanda
+
+En **Análisis → Balance de vueltas**, el panel compara la referencia más rápida
+sin nuevos incidentes con la vuelta completa más lenta analizable. También permite
+seleccionar otra vuelta: muestra diferencia de tiempo, trazas por progreso y los
+tres tramos con mayor pérdida, junto con velocidad, gas, freno y tiempo con ABS.
+El JSON del balance y el informe Markdown incluyen los motivos de exclusión.
+
+Se conserva la vuelta con errores para poder revisarla. Se excluyen vueltas
+incompletas, replay, datos discontinuos, detenciones sostenidas y pasos por boxes
+reportados por `OnPitRoad`. Grabaciones antiguas sin ese canal pueden contener un
+paso por boxes en movimiento no identificable; el panel lo advierte. Daño y tráfico
+desconocidos permiten una revisión descriptiva, sin asumir condiciones limpias.
+Una referencia con daño explícito se descarta. Este balance es independiente del
+comparador estricto, que conserva sus criterios originales.
+
+El balance usa el último bloque de sesión y la misma identidad de auto/pista/layout.
+Las pérdidas se ubican en tramos del 5% de vuelta, todavía sin asignación a curvas.
+ABS o un cambio de pedal no prueban bloqueo, patinaje ni la causa del tiempo perdido.
+La selección manual queda fijada hasta volver a Automática o cambiar de sesión.
+
+### Desarrollo local
+
 Solo código, tests sintéticos y documentación técnica. Fotos, videos, grabaciones
 reales, informes de sesiones y contexto privado quedan fuera de Git. No se envía
 telemetría ni se modifican ajustes del juego o automatiza conducción. Sin APIs de IA.
 
 La aprobación de la suite no acredita utilidad en pista ni audibilidad.
-En Python 3.15 se verificaron 99 tests, demo/replay con 901 muestras y `pip check`.
+Para desarrollar la interfaz, ejecutar también `node --test tests/dashboard.test.cjs`
+con Node.js; usa su runner nativo y no requiere instalar paquetes.
+En Python 3.15 se verificaron 121 tests y demo/replay con 901 muestras;
+las regresiones de interfaz usan 10 tests nativos de Node.js.
 El SDK inició limpio pero sin simulador conectado (0 muestras); SAPI indicó
 `ready`, lo que no confirma audio oído ni validación conduciendo.
 Ver [arquitectura](docs/ARCHITECTURE.md), [canales SDK](docs/SDK_CHANNELS.md),

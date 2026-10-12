@@ -19,6 +19,7 @@ from .corners import corner_guidance
 from .demo import demo_samples
 from .navigation import Navigator
 from .review import review_vertical, validate_marker
+from .race_results import race_results
 from .storage import Recorder, load_events, load_replay
 from .voice import VoiceCoach
 
@@ -157,6 +158,7 @@ class App:
                 self.cache["samples_received"] = self.total
                 self.cache["memory_window_truncated"] = self.total > len(self.samples)
                 self.cache["review"] = review_vertical(list(self.samples), self.markers)
+                self.cache["race_results"] = race_results(list(self.samples))
                 if self.marker_error:
                     self.cache["review"]["note"] += " " + self.marker_error
                 self.cache_time = time.monotonic()
@@ -224,6 +226,17 @@ def handler_for(app):
                 return self.send(result)
             if url.path == "/api/report.json":
                 return self.send(app.summary())
+            if url.path == "/api/race-results.json":
+                query = parse_qs(url.query)
+                lap_id = query.get("lap", [None])[0]
+                if lap_id is None:
+                    return self.send(app.summary()["race_results"])
+                try:
+                    with app.lock:
+                        result = race_results(list(app.samples), review_lap_id=lap_id)
+                    return self.send(result)
+                except ValueError as error:
+                    return self.send({"error": str(error)}, status=400)
             if url.path == "/api/report.md":
                 return self.send(report_markdown(app.summary()).encode("utf-8"), "text/markdown; charset=utf-8")
             if url.path == "/api/voice-history.json":

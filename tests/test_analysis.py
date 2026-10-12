@@ -26,6 +26,14 @@ def lap_samples(lap: int, *, session: str = "s1", source: str = "demo",
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_incident_first_observed_at_finish_excludes_the_completed_lap(self):
+        samples = lap_samples(1)
+        samples[-1] = replace(samples[-1], incidents=1)
+        previous = summarize(samples)["laps"][0]
+        self.assertTrue(previous["complete"])
+        self.assertFalse(previous["eligible"])
+        self.assertIn("incidente", previous["reason"])
+
     def test_sustained_brake_rise_is_driving_cue_not_sensor_diagnosis(self):
         samples = lap_samples(1)
         samples[5] = replace(samples[5], brake=0.0)

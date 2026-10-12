@@ -49,7 +49,8 @@ class ModelAndStorageTests(unittest.TestCase):
         self.assertIsNone(sample.abs_active)
         self.assertIsNone(sample.throttle_raw)
         self.assertIsNone(sample.vert_accel_mps2)
-        for field, invalid in (("abs_active", 1), ("throttle_raw", -0.1), ("vert_accel_mps2", float("nan"))):
+        self.assertIsNone(sample.on_pit_road)
+        for field, invalid in (("on_pit_road", 1), ("abs_active", 1), ("throttle_raw", -0.1), ("vert_accel_mps2", float("nan"))):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 Sample.from_dict({**old, field: invalid})
 
@@ -223,6 +224,27 @@ class LocalAppTests(unittest.TestCase):
         self.assertIsNone(self.app.recorder)
         self.assertIn("disk full", self.app.snapshot()["record_error"])
         self.assertEqual(1, self.app.total)
+
+    def test_race_results_export_and_manual_selection_are_local_read_only(self):
+        slower = (replace(s, time_s=s.time_s + max(0, s.time_s - 30) * .05) for s in demo_samples())
+        collect(self.app, slower, threading.Event(), realtime=False)
+        status, raw = self.request("GET", "/api/race-results.json")
+        self.assertEqual(200, status)
+        balance = json.loads(raw)
+        self.assertEqual("ok", balance["status"])
+        self.assertEqual(balance, json.loads(self.request("GET", "/api/state")[1])["summary"]["race_results"])
+        query = urlencode({"lap": balance["worst"]["id"]})
+        selected = json.loads(self.request("GET", "/api/race-results.json?" + query)[1])
+        self.assertEqual("manual", selected["selection"])
+        self.assertEqual(balance["comparison"], selected["comparison"])
+        self.assertEqual(400, self.request("GET", "/api/race-results.json?lap=missing")[0])
+        self.assertEqual(403, self.request("GET", "/api/race-results.json",
+                                          headers={"Origin": "https://other.example"})[0])
+        report = self.request("GET", "/api/report.md")[1].decode()
+        self.assertIn("Balance de vueltas", report)
+        self.assertIn("Referencia: vuelta", report)
+        self.assertIn("Revisar primero el tramo", report)
+        self.assertFalse(self.path.exists())
 
     def test_source_close_failure_still_closes_recording(self):
         class BrokenClose:

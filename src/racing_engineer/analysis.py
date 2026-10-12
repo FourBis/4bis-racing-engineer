@@ -27,10 +27,17 @@ class _Lap:
     start_time_s: float | None = None
     end_time_s: float | None = None
     run_number: int = 0
+    end_incidents: int | None = None
 
     @property
     def complete(self) -> bool:
         return self.start_boundary and self.end_boundary
+
+    @property
+    def incident_counts(self) -> list[int | None]:
+        # Include the crossing tick without adding the next lap's progress to traces.
+        counts = [sample.incidents for sample in self.samples]
+        return counts + [self.end_incidents] if self.end_boundary else counts
 
 
 def _finite(value: float | int | None) -> bool:
@@ -80,6 +87,7 @@ def _lap_groups(samples: Iterable[Sample]) -> list[_Lap]:
             observed = 0 < dt <= _MAX_GAP_S
             lap.end_time_s = crossed_at
             lap.end_boundary = observed
+            lap.end_incidents = sample.incidents if observed else None
             result.append(lap)
             lap = new_lap(key, sample, at_boundary=observed, start_time_s=crossed_at)
         elif lap is None:
@@ -148,7 +156,7 @@ def _comparison_gate(lap: _Lap) -> tuple[bool, str]:
         return False, "daño desconocido o distinto de sano"
     if any(s.traffic != "clear" for s in lap.samples):
         return False, "tráfico desconocido o no despejado"
-    incidents = [s.incidents for s in lap.samples]
+    incidents = lap.incident_counts
     if any(value is None for value in incidents):
         return False, "contador de incidentes desconocido"
     if any(value != 0 for value in incidents):
@@ -424,6 +432,22 @@ def report_markdown(summary: dict) -> str:
     if annotations:
         lines.append(f"Anotaciones del operador: {annotations}")
         lines.append("")
+    balance = summary.get("race_results")
+    if balance:
+        lines.extend(["## Balance de vueltas", "Comparación descriptiva; tiempos derivados, no oficiales."])
+        if balance.get("status") == "ok":
+            best, other = balance["best"], balance["worst"]
+            lines.extend([
+                f"Referencia: vuelta {best['lap']}, {best['duration_s']:.3f} s.",
+                f"Revisión: vuelta {other['lap']}, {other['duration_s']:.3f} s; diferencia {balance['delta_s']:+.3f} s.",
+            ])
+            for segment in balance.get("segments", []):
+                lines.append(f"- Tramo {segment['start_pct']:.0f}–{segment['end_pct']:.0f}%: "
+                             f"{segment['delta_s']:+.3f} s. Revisar trazas de velocidad y pedales en el panel.")
+        for row in balance.get("laps", []):
+            state = "analizable" if row["review_eligible"] else f"excluida: {row['exclusion_reason']}"
+            lines.append(f"- Vuelta {row['lap']}: {state}. {' '.join(row['context'])}")
+        lines.extend([*balance.get("limitations", []), "", "## Comparación estricta", ""])
     for lap in laps:
         duration = lap.get("duration_s")
         derived = f"duración derivada {duration:.2f} s (no oficial)" if duration is not None else "duración no disponible"
@@ -445,7 +469,8 @@ def report_markdown(summary: dict) -> str:
                 f"- Límite: {item['limitations']}", "",
             ])
     else:
-        lines.extend(["No hay hallazgos respaldados con los datos disponibles.", ""])
+        lines.extend(["El detector de patrones no agregó otros hallazgos." if balance and balance.get("status") == "ok"
+                      else "No hay hallazgos respaldados con los datos disponibles.", ""])
     comparison = summary.get("comparison")
     if comparison:
         lines.extend(["## Comparación seleccionada", f"Estado: {comparison['status']}",
@@ -455,8 +480,13 @@ def report_markdown(summary: dict) -> str:
             lines.append(f"Cobertura común: {points[0]['progress_pct']:.2f}–{points[-1]['progress_pct']:.2f} %. "
                          f"Delta B−A al final de esa cobertura: {points[-1]['delta_s']:+.3f} s.")
         lines.extend([comparison.get("limitations") or comparison.get("reason", ""), ""])
-    lines.extend(["## Próxima prueba", findings[0]["next_test"] if findings else
-                  "Registrar una vuelta con límites de meta observados y estados de auto, tráfico y replay conocidos."])
+    next_test = findings[0]["next_test"] if findings else "Registrar una vuelta con límites de meta observados y estados de auto, tráfico y replay conocidos."
+    if balance and balance.get("segments"):
+        segment = balance["segments"][0]
+        next_test = (f"Revisar primero el tramo {segment['start_pct']:.0f}–{segment['end_pct']:.0f}% "
+                     f"({segment['delta_s']:+.3f} s): contrastar velocidad de entrada/salida y trazas de pedales "
+                     "con la referencia, teniendo en cuenta tráfico e incidentes antes de atribuirlo a técnica.")
+    lines.extend(["## Próxima prueba", next_test])
     review = summary.get("review")
     if review:
         lines.extend(["", "## Revisión vertical", review["note"],

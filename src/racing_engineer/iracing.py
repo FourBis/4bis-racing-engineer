@@ -29,6 +29,7 @@ _CHANNELS: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "LapCurrentLapTime": ("s", "Estimación del tiempo de vuelta actual", ("s",)),
     "PlayerCarMyIncidentCount": ("incidents", "Incidentes propios de la sesión", ("",)),
     "IsOnTrack": ("bool", "Física de pista activa con el jugador dentro del auto", ("",)),
+    "OnPitRoad": ("bool", "Auto en el carril de boxes entre los conos", ("",)),
     "IsReplayPlaying": ("bool", "Reproducción activa", ("",)),
 }
 
@@ -376,6 +377,7 @@ class IRacingSource:
                 incidents=self._optional("PlayerCarMyIncidentCount", get("PlayerCarMyIncidentCount"),
                                          minimum=0, integer=True),
                 on_track=self._optional("IsOnTrack", get("IsOnTrack"), boolean=True),
+                on_pit_road=self._optional("OnPitRoad", get("OnPitRoad"), boolean=True),
                 is_replay=self._optional("IsReplayPlaying", get("IsReplayPlaying"), boolean=True),
                 brake_raw=self._optional("BrakeRaw", get("BrakeRaw"), minimum=0, maximum=1),
                 throttle_raw=self._optional("ThrottleRaw", get("ThrottleRaw"), minimum=0, maximum=1),
