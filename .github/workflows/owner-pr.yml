@@ -1,0 +1,55 @@
+name: PR author policy
+
+on:
+  pull_request_target:
+    branches: [develop, main, master]
+    types: [opened, reopened, synchronize, edited, ready_for_review]
+
+permissions:
+  statuses: write
+  pull-requests: write
+
+jobs:
+  owner-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      # No checkout: solo datos del evento y codigo de la rama base de confianza.
+      - name: Solo PR de JeremiasBadilla
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.request
+
+          with open(os.environ['GITHUB_EVENT_PATH'], encoding='utf-8') as stream:
+              pr = json.load(stream)['pull_request']
+          repository = os.environ['GITHUB_REPOSITORY']
+          assert repository == 'FourBis/4bis-racing-engineer'
+          sha = pr['head']['sha']
+          assert re.fullmatch(r'[0-9a-f]{40}', sha)
+          allowed = pr['user']['id'] == 66529405
+          if allowed:
+              url = f'https://api.github.com/repos/{repository}/statuses/{sha}'
+              method, expected = 'POST', 201
+              payload = {'state': 'success', 'context': 'owner-pr', 'description': 'Autor autorizado'}
+          else:
+              # Un SHA puede compartirse entre PR: no escribir failure sobre el de otro PR.
+              number = pr['number']
+              assert isinstance(number, int) and number > 0
+              url = f'https://api.github.com/repos/{repository}/pulls/{number}'
+              method, expected = 'PATCH', 200
+              payload = {'state': 'closed'}
+          request = urllib.request.Request(
+              url, data=json.dumps(payload).encode('utf-8'),
+              headers={'Authorization': 'Bearer ' + os.environ['GITHUB_TOKEN'],
+                       'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json'},
+              method=method)
+          with urllib.request.urlopen(request, timeout=20) as response:
+              assert response.status == expected
+          if not allowed:
+              raise SystemExit('PR cerrado por autor no autorizado')
+          PY
