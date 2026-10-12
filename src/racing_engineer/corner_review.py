@@ -72,6 +72,13 @@ def _frames(lap):
     start, duration = lap.start_time_s, lap.end_time_s - lap.start_time_s
     samples = [s for s in lap.samples if start < s.time_s < lap.end_time_s]
     stride = max(1, (len(samples) + 1197) // 1198)
+    indices = set(range(0, len(samples), stride))
+    # ponytail: 1.200 cuadros objetivo; los bordes de huecos pueden excederlo.
+    # Si el tamaño lo exige, representar intervalos ausentes sin descartar evidencia.
+    for index, (previous, current) in enumerate(zip(samples, samples[1:]), 1):
+        if any((getattr(previous, name) is None) != (getattr(current, name) is None)
+               for name in ("speed_mps", "brake", "throttle")):
+            indices.update((index - 1, index))
 
     def controls(sample):
         return [None if getattr(sample, name) is None else getattr(sample, name) * scale
@@ -83,9 +90,10 @@ def _frames(lap):
                                           for value, scale in zip(values, (3.6, 100, 100))]]
 
     frames = [boundary(0, 0)]
-    frames.extend([s.time_s - start, s.lap_dist_pct * 100, *controls(s)]
-                  for s in samples[::stride])
-    frames.append(boundary(1, duration))
+    for index in sorted(indices):
+        sample = samples[index]
+        frames.append([sample.time_s - start, sample.lap_dist_pct * 100, *controls(sample)])
+    frames.append([duration, 100, None, None, None])
     labels = Counter(s.lap for s in lap.samples if s.lap is not None).most_common(1)
     return {"lap": labels[0][0] if labels else None, "duration_s": duration, "frames": frames}
 

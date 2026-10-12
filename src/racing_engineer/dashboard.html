@@ -80,7 +80,8 @@ details{margin-top:16px}summary{cursor:pointer;color:var(--muted);font-size:12px
     <label for="raceLap">Vuelta a revisar <select id="raceLap"><option value="">Automática · más lenta analizable</option></select></label>
     <div class="nav-zones"><div class="nav-zone"><span>REFERENCIA · SIN NUEVOS INCIDENTES</span><strong id="raceBest">—</strong></div><div class="nav-zone"><span id="raceWorstLabel">MÁS LENTA ANALIZABLE</span><strong id="raceWorst">—</strong></div><div class="nav-zone"><span>DIFERENCIA TOTAL</span><strong id="raceGap">—</strong></div></div>
     <div id="cornerReview" class="corner-review">
-      <header><h3 id="cornerReviewHeading">Análisis por curva</h3><span id="cornerReviewStatus" class="muted"></span></header>
+      <header><h3 id="cornerReviewHeading">Análisis por curva</h3></header>
+      <p id="cornerReviewStatus" class="corner-note"></p>
       <p id="cornerReviewFallback" class="corner-fallback" role="status" hidden></p>
       <div id="cornerReviewMapPanel" hidden>
         <div class="corner-map-layout">
@@ -306,6 +307,7 @@ function renderCornerReview(review,session){
   if(cornerReviewState.session!==session||cornerReviewState.signature!==signature)resetCornerReplay(session,signature);
   if(cornerReviewState.available!==available){$('raceDistanceDetails').open=!available;cornerReviewState.available=available}
   $('cornerReviewMapPanel').hidden=!available;$('cornerReviewFallback').hidden=available;
+  $('cornerReviewStatus').textContent=available?review?.note||'':'';
   if(!available){cancelCornerReplay();cornerReviewState.data=review||null;$('cornerReviewFallback').textContent=review?.reason||review?.note||'El análisis por curva no está disponible; se conserva el balance técnico por distancia.';return}
   cornerReviewState.data=review;cornerReviewState.duration=replayDuration(review);drawCornerMap(review);
   const replay=review.replay||{},hasFrames=replayFrames(replay.first).length>0&&replayFrames(replay.second).length>0;

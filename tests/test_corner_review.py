@@ -90,6 +90,37 @@ class CornerReviewTests(unittest.TestCase):
         self.assertIn("sin GPS", result["note"])
         self.assertIn("no son entradas", result["note"])
 
+    def test_decimation_keeps_both_edges_of_isolated_and_sustained_channel_gaps(self):
+        source = samples_with_loss(count=4000)
+        gaps = (("brake", 3, 602, 602), ("speed_mps", 2, 1002, 1020),
+                ("throttle", 4, 1502, 1502))
+        for channel, _, start, end in gaps:
+            for index in range(start, end + 1):
+                source[index] = replace(source[index], **{channel: None})
+        replay = corner_review(*laps(source))["replay"]["first"]
+        frames = {frame[0]: frame for frame in replay["frames"]}
+        for channel, column, start, end in gaps:
+            with self.subTest(channel=channel):
+                for index in (start - 1, start, end, end + 1):
+                    self.assertTrue(source[index].time_s in frames,
+                                    f"Falta el borde de {channel} en muestra {index}")
+                    value = frames[source[index].time_s][column]
+                    if start <= index <= end:
+                        self.assertIsNone(value)
+                    else:
+                        self.assertIsNotNone(value)
+        self.assertLess(len(frames), 1200)
+
+    def test_finish_frame_clears_channels_even_when_sdk_observed_exactly_one(self):
+        source = samples_with_loss()
+        source[999] = replace(source[999], lap_dist_pct=1, brake=0.4, throttle=0.8)
+        first, second = laps(source)
+        self.assertEqual(first.samples[-1].lap_dist_pct, 1)
+        self.assertIsNotNone(first.samples[-1].throttle)
+        frame = corner_review(first, second)["replay"]["first"]["frames"][-1]
+        self.assertEqual(frame[:2], [first.end_time_s - first.start_time_s, 100])
+        self.assertEqual(frame[2:], [None, None, None])
+
     def test_race_results_includes_review_for_selected_pair(self):
         result = race_results(samples_with_loss())
         self.assertEqual(result["status"], "ok")

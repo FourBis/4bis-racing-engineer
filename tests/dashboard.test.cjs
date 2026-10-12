@@ -367,6 +367,10 @@ test('corner review muestra el top 3, resalta y busca la entrada más temprana; 
   const { dashboard, get } = loadDashboard();
   const result = cornerResult();
   dashboard.renderRaceResults(result);
+  assert.equal(get('cornerReviewStatus').textContent, result.corner_review.note);
+  result.corner_review.note = undefined;
+  dashboard.renderRaceResults(result);
+  assert.equal(get('cornerReviewStatus').textContent, '');
   assert.equal(get('cornerReviewMapPanel').hidden, false);
   assert.equal(get('raceDistanceDetails').open, false);
   assert.equal(get('cornerZoneList').children.length, 3);
@@ -420,6 +424,7 @@ test('corner review conserva replay en polls idénticos, lo pausa al cambiar ses
 
   dashboard.renderRaceResults({ ...cornerResult('no-map'), corner_review: { available: false, reason: 'Falta el mapa oficial de la pista.' } });
   assert.equal(get('cornerReviewMapPanel').hidden, true);
+  assert.equal(get('cornerReviewStatus').textContent, '');
   assert.equal(get('cornerReviewFallback').textContent, 'Falta el mapa oficial de la pista.');
   assert.equal(get('raceDistanceDetails').open, true);
 });

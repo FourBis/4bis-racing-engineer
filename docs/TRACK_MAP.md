@@ -35,8 +35,10 @@ curvas 11–12. Sus límites sirven para localizar diferencias; no son entradas,
 
 La pérdida de cada zona es su tiempo local en B menos su tiempo local en A;
 no repite la diferencia acumulada desde meta. Las métricas usan las muestras
-originales. La reproducción visual conserva hasta 1.200 cuadros por vuelta e
-interpola por tiempo transcurrido desde su propio cruce de meta. Cada auto lleva
+originales. La reproducción visual reduce las capturas continuas a un máximo de
+1.200 cuadros por vuelta; conserva además ambos lados de cada transición a datos
+ausentes, aunque supere ese objetivo, para no interpolar a través de huecos.
+Interpola por tiempo transcurrido desde su propio cruce de meta. Cada auto lleva
 su propio progreso y sus mandos; los canales desconocidos no se rellenan.
 Al finalizar una vuelta, el marcador permanece en meta y los mandos dejan de
 mostrarse. La comparación de trazas por distancia sigue en el detalle técnico.
