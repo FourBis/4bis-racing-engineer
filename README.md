@@ -83,3 +83,6 @@ Ver [arquitectura](docs/ARCHITECTURE.md), [canales SDK](docs/SDK_CHANNELS.md),
 
 La rama principal es `develop`; se integran únicamente PR de JeremiasBadilla
 con las comprobaciones obligatorias aprobadas. Ver [reglas de contribución](CONTRIBUTING.md).
+
+[Ejecuciones de CI](https://github.com/FourBis/4bis-racing-engineer/actions/workflows/ci.yml)
+· [Reglas activas de la principal](https://github.com/FourBis/4bis-racing-engineer/rules)
