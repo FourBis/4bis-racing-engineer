@@ -219,7 +219,7 @@ def race_results(samples, review_lap_id=None):
                 "second": {name: _interpolate(second, progress, name) for name in _CHANNELS},
                 "delta_s": (t2 - second.start_time_s) - (t1 - first.start_time_s),
             })
-    # ponytail: 20 tramos fijos y solo un par; subir a curvas con mapa validado.
+    # ponytail: conservar 20 tramos como detalle para pistas sin zonas conocidas.
     sections = []
     for index in range(20):
         lo, hi = index / 20, (index + 1) / 20
@@ -230,4 +230,7 @@ def race_results(samples, review_lap_id=None):
                          "delta_s": b["duration_s"] - a["duration_s"], "first": a, "second": b})
     result["segments"] = sorted((s for s in sections if s["delta_s"] > 0.000001),
                                 key=lambda s: s["delta_s"], reverse=True)[:3]
+    from .corner_review import corner_review
+
+    result["corner_review"] = corner_review(first, second)
     return result

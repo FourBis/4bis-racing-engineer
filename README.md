@@ -90,8 +90,18 @@ No se prometen mejoras de tiempo.
 
 En **Análisis → Balance de vueltas**, el panel compara la referencia más rápida
 sin nuevos incidentes con la vuelta completa más lenta analizable. También permite
-seleccionar otra vuelta: muestra diferencia de tiempo, trazas por progreso y los
-tres tramos con mayor pérdida, junto con velocidad, gas, freno y tiempo con ABS.
+seleccionar otra vuelta. En Road Atlanta Full Course muestra las tres zonas de
+curvas con mayor pérdida, sus nombres y su ubicación resaltada en el mapa;
+**Todas las zonas** permite recorrer el resto. Cada zona explica las diferencias
+observadas y propone qué comparar en la siguiente práctica.
+
+**Reproducir** mueve ambas vueltas con el mismo reloj desde el cruce de meta de
+cada una, junto con velocidad, freno y acelerador. Permite pausar, retroceder y
+usar velocidad 0,5×, 1× o 2×; seleccionar una zona busca su inicio. Los dos autos
+pueden estar en posiciones distintas al mismo tiempo. El mapa es esquemático,
+sin GPS ni trazada real; los límites de zona son aproximados. Sin una identidad
+compatible se conserva el **Detalle técnico por distancia**, con trazas por
+progreso y los tres tramos del 5% con mayor pérdida.
 El JSON del balance y el informe Markdown incluyen los motivos de exclusión.
 
 Se conserva la vuelta con errores para poder revisarla. Se excluyen vueltas
@@ -103,7 +113,8 @@ Una referencia con daño explícito se descarta. Este balance es independiente d
 comparador estricto, que conserva sus criterios originales.
 
 El balance usa el último bloque de sesión y la misma identidad de auto/pista/layout.
-Las pérdidas se ubican en tramos del 5% de vuelta, todavía sin asignación a curvas.
+El análisis por zonas exige TrackID, layout, longitud y auto conocidos y compatibles.
+Las zonas agrupan curvas cercanas; no certifican ápices ni entradas o salidas exactas.
 ABS o un cambio de pedal no prueban bloqueo, patinaje ni la causa del tiempo perdido.
 La selección manual queda fijada hasta volver a Automática o cambiar de sesión.
 
@@ -116,8 +127,8 @@ telemetría ni se modifican ajustes del juego o automatiza conducción. Sin APIs
 La aprobación de la suite no acredita utilidad en pista ni audibilidad.
 Para desarrollar la interfaz, ejecutar también `node --test tests/dashboard.test.cjs`
 con Node.js; usa su runner nativo y no requiere instalar paquetes.
-En Python 3.15 se verificaron 121 tests y demo/replay con 901 muestras;
-las regresiones de interfaz usan 10 tests nativos de Node.js.
+Las pruebas cubren selección de vueltas, pérdidas locales por zona, replay temporal,
+canales ausentes, mapas incompatibles y controles de la interfaz.
 El SDK inició limpio pero sin simulador conectado (0 muestras); SAPI indicó
 `ready`, lo que no confirma audio oído ni validación conduciendo.
 Ver [arquitectura](docs/ARCHITECTURE.md), [canales SDK](docs/SDK_CHANNELS.md),
