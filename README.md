@@ -1,15 +1,17 @@
 # 4bis Racing Engineer
 
 MVP local de telemetría y coaching para iRacing: demo sintética, replay SQLite,
-dashboard, lectura del SDK Windows y voz local opcional. Python 3.11+.
+dashboard, lectura del SDK Windows y voz local opcional. Se recomienda Python
+3.15; la compatibilidad mínima sigue siendo Python 3.11.
 Demo, replay y tests usan la biblioteca estándar, sin cuenta ni API key.
 
 ## Iniciar
 
 ```powershell
-python run.py demo
+py -3.15 -m venv .venv
+.\.venv\Scripts\python.exe run.py demo
 # Abrir http://127.0.0.1:8765
-python check.py
+.\.venv\Scripts\python.exe check.py
 ```
 
 La demo tiene tres vueltas sintéticas de 30 segundos, a velocidad x5. No
@@ -17,20 +19,25 @@ representa una combinación real de auto y pista. `--speed 1` reproduce en tiemp
 
 ```powershell
 # Crear una grabación e informe exclusivamente sintéticos.
-python run.py demo --headless --record recordings/demo.sqlite --report reports/demo
+.\.venv\Scripts\python.exe run.py demo --headless --record recordings/demo.sqlite --report reports/demo
 # Replay sin modificar el origen.
-python run.py replay recordings/demo.sqlite
+.\.venv\Scripts\python.exe run.py replay recordings/demo.sqlite
 ```
 
 LIVE requiere Windows, iRacing y `pyirsdk`. La voz requiere además `pywin32` y una
 voz española de Windows SAPI. Instalar solo lo que falte:
 
 ```powershell
-python -m pip install pyirsdk pywin32
-python run.py live --port 8766
+$env:PYYAML_FORCE_LIBYAML = "0"
+.\.venv\Scripts\python.exe -m pip install pyirsdk pywin32
+.\.venv\Scripts\python.exe run.py live --port 8766
 # Prueba breve del SDK, solo lectura:
-python run.py live --headless --seconds 5
+.\.venv\Scripts\python.exe run.py live --headless --seconds 5
 ```
+
+En Python 3.15, PyYAML 6.0.3 puede instalarse sin compilador C++ usando
+`PYYAML_FORCE_LIBYAML=0`: selecciona el parser Python puro. En PowerShell,
+`$env:` limita esta opción al proceso actual.
 
 El panel indica conexión, datos obsoletos y canales ausentes. Iniciar el programa
 no activa grabación ni voz. Usar **Iniciar grabación**, **Activar voz** o los
@@ -78,6 +85,9 @@ reales, informes de sesiones y contexto privado quedan fuera de Git. No se enví
 telemetría ni se modifican ajustes del juego o automatiza conducción. Sin APIs de IA.
 
 La aprobación de la suite no acredita utilidad en pista ni audibilidad.
+En Python 3.15 se verificaron 99 tests, demo/replay con 901 muestras y `pip check`.
+El SDK inició limpio pero sin simulador conectado (0 muestras); SAPI indicó
+`ready`, lo que no confirma audio oído ni validación conduciendo.
 Ver [arquitectura](docs/ARCHITECTURE.md), [canales SDK](docs/SDK_CHANNELS.md),
 [mapa](docs/TRACK_MAP.md) y [mejoras propuestas](docs/ROADMAP.md).
 
