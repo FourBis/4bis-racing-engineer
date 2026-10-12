@@ -226,7 +226,8 @@ class LocalAppTests(unittest.TestCase):
         self.assertEqual(1, self.app.total)
 
     def test_race_results_export_and_manual_selection_are_local_read_only(self):
-        collect(self.app, demo_samples(), threading.Event(), realtime=False)
+        slower = (replace(s, time_s=s.time_s + max(0, s.time_s - 30) * .05) for s in demo_samples())
+        collect(self.app, slower, threading.Event(), realtime=False)
         status, raw = self.request("GET", "/api/race-results.json")
         self.assertEqual(200, status)
         balance = json.loads(raw)
@@ -242,6 +243,7 @@ class LocalAppTests(unittest.TestCase):
         report = self.request("GET", "/api/report.md")[1].decode()
         self.assertIn("Balance de vueltas", report)
         self.assertIn("Referencia: vuelta", report)
+        self.assertIn("Revisar primero el tramo", report)
         self.assertFalse(self.path.exists())
 
     def test_source_close_failure_still_closes_recording(self):

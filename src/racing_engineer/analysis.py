@@ -461,7 +461,8 @@ def report_markdown(summary: dict) -> str:
                 f"- Límite: {item['limitations']}", "",
             ])
     else:
-        lines.extend(["No hay hallazgos respaldados con los datos disponibles.", ""])
+        lines.extend(["El detector de patrones no agregó otros hallazgos." if balance and balance.get("status") == "ok"
+                      else "No hay hallazgos respaldados con los datos disponibles.", ""])
     comparison = summary.get("comparison")
     if comparison:
         lines.extend(["## Comparación seleccionada", f"Estado: {comparison['status']}",
@@ -471,8 +472,13 @@ def report_markdown(summary: dict) -> str:
             lines.append(f"Cobertura común: {points[0]['progress_pct']:.2f}–{points[-1]['progress_pct']:.2f} %. "
                          f"Delta B−A al final de esa cobertura: {points[-1]['delta_s']:+.3f} s.")
         lines.extend([comparison.get("limitations") or comparison.get("reason", ""), ""])
-    lines.extend(["## Próxima prueba", findings[0]["next_test"] if findings else
-                  "Registrar una vuelta con límites de meta observados y estados de auto, tráfico y replay conocidos."])
+    next_test = findings[0]["next_test"] if findings else "Registrar una vuelta con límites de meta observados y estados de auto, tráfico y replay conocidos."
+    if balance and balance.get("segments"):
+        segment = balance["segments"][0]
+        next_test = (f"Revisar primero el tramo {segment['start_pct']:.0f}–{segment['end_pct']:.0f}% "
+                     f"({segment['delta_s']:+.3f} s): contrastar velocidad de entrada/salida y trazas de pedales "
+                     "con la referencia, teniendo en cuenta tráfico e incidentes antes de atribuirlo a técnica.")
+    lines.extend(["## Próxima prueba", next_test])
     review = summary.get("review")
     if review:
         lines.extend(["", "## Revisión vertical", review["note"],
