@@ -17,6 +17,7 @@ _CHANNELS: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "Speed": ("m/s", "Velocidad GPS del vehículo", ("m/s",)),
     "Brake": ("% (0–1)", "Mando de freno procesado por el simulador", ("%",)),
     "BrakeRaw": ("% (0–1)", "Entrada bruta del mando de freno", ("%",)),
+    "dcBrakeBias": ("ajuste SDK", "Ajuste de brake bias reportado por el auto; escala sin interpretar", ()),
     "Throttle": ("% (0–1)", "Mando de acelerador procesado por el simulador", ("%",)),
     "ThrottleRaw": ("% (0–1)", "Entrada bruta del acelerador del simulador", ("%",)),
     "BrakeABSactive": ("bool", "ABS reduciendo presión de freno; no confirma bloqueo de rueda", ("",)),
@@ -186,6 +187,16 @@ class IRacingSource:
             info.update(available=exists, valid=exists, issue=None if exists else "canal no disponible en esta sesión")
             if exists:
                 readable.add(name)
+            if name == "dcBrakeBias":
+                # Driver-adjustment scale is car-specific; SDK captures include empty units.
+                # Preserve the value/unit rather than assuming a universal front percentage.
+                unit = getattr(header, "unit", None) if header is not None else None
+                unit = unit.strip() if isinstance(unit, str) and len(unit.strip()) <= 32 else None
+                info.update(sdk_unit=unit, unit=unit or "ajuste SDK (unidad sin confirmar)")
+                if exists:
+                    info["issue"] = ("ajuste bruto del auto; unidad sin confirmar" if not unit
+                                     else "ajuste bruto del auto; escala sin interpretar")
+                continue
             if header is not None:
                 unit = getattr(header, "unit", None)
                 desc = getattr(header, "desc", None)
@@ -359,6 +370,12 @@ class IRacingSource:
                 self._segment += 1
 
             sid = f"{base_session}:segment={self._segment}"
+            brake_bias = self._optional("dcBrakeBias", get("dcBrakeBias"))
+            if brake_bias is not None:
+                bias_info = self._channels["dcBrakeBias"]
+                bias_info.update(available=True, valid=True,
+                                 issue=("ajuste bruto del auto; unidad sin confirmar" if not bias_info.get("sdk_unit")
+                                        else "ajuste bruto del auto; escala sin interpretar"))
             sample = Sample(
                 source="iracing",
                 session_id=sid,
@@ -380,6 +397,9 @@ class IRacingSource:
                 on_pit_road=self._optional("OnPitRoad", get("OnPitRoad"), boolean=True),
                 is_replay=self._optional("IsReplayPlaying", get("IsReplayPlaying"), boolean=True),
                 brake_raw=self._optional("BrakeRaw", get("BrakeRaw"), minimum=0, maximum=1),
+                brake_bias=brake_bias,
+                brake_bias_unit=(self._channels["dcBrakeBias"].get("sdk_unit")
+                                 if brake_bias is not None else None),
                 throttle_raw=self._optional("ThrottleRaw", get("ThrottleRaw"), minimum=0, maximum=1),
                 abs_active=self._optional("BrakeABSactive", get("BrakeABSactive"), boolean=True),
                 vert_accel_mps2=self._optional("VertAccel", get("VertAccel")),

@@ -35,6 +35,9 @@ class Sample:
     car_id: int | None = None
     car_name: str | None = None
     on_pit_road: bool | None = None
+    # Raw driver-adjustment value; its meaning can vary by car. Never a pedal percentage.
+    brake_bias: float | None = None
+    brake_bias_unit: str | None = None
 
     def __post_init__(self):
         if self.source not in ("demo", "iracing"):
@@ -57,13 +60,13 @@ class Sample:
             if value is not None and (type(value) is not int or value < 0):
                 raise ValueError(f"{name} debe ser un entero no negativo o null")
         for name, minimum, maximum in (("track_name", 1, 160), ("track_config", 0, 160),
-                                       ("car_name", 1, 160)):
+                                       ("car_name", 1, 160), ("brake_bias_unit", 0, 32)):
             value = getattr(self, name)
             if value is not None and (not isinstance(value, str) or not minimum <= len(value) <= maximum):
                 raise ValueError(f"{name} debe tener entre {minimum} y {maximum} caracteres o ser null")
         for name in ("time_s", "lap_dist_pct", "speed_mps", "brake", "throttle", "clutch",
                      "steering_wheel_rad", "rpm", "fuel_l", "lap_time_s", "brake_raw",
-                     "throttle_raw", "vert_accel_mps2", "track_length_m"):
+                     "throttle_raw", "vert_accel_mps2", "track_length_m", "brake_bias"):
             value = getattr(self, name)
             if value is None and name != "time_s":
                 continue
@@ -71,7 +74,7 @@ class Sample:
                 raise ValueError(f"{name} debe ser un número finito o null")
             if name in ("lap_dist_pct", "brake", "throttle", "clutch", "brake_raw", "throttle_raw") and not 0 <= value <= 1:
                 raise ValueError(f"{name} requiere fracción entre 0 y 1")
-            if name not in ("steering_wheel_rad", "vert_accel_mps2") and value < 0:
+            if name not in ("steering_wheel_rad", "vert_accel_mps2", "brake_bias") and value < 0:
                 raise ValueError(f"{name} no puede ser negativo")
             if name == "track_length_m" and not 0 < value <= 1_000_000:
                 raise ValueError("track_length_m debe ser mayor que 0 y hasta 1000000")

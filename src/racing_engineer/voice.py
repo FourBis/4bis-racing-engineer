@@ -10,6 +10,7 @@ import uuid
 from collections import deque
 from datetime import datetime, timezone
 from importlib.util import find_spec
+from math import isfinite
 
 
 _LIMITATIONS = [
@@ -32,7 +33,7 @@ class WindowsSpeech:
         self.ready = False
         self.speaking = False
         self.error: str | None = None
-        self._queue: queue.Queue[tuple[str, str, str, int] | None] = queue.Queue(maxsize=1)
+        self._queue: queue.Queue[tuple[str, str, str, int, float | None] | None] = queue.Queue(maxsize=1)
         self._lock = threading.Lock()
         self._events_lock = threading.Lock()
         self._events: deque[dict] = deque()
@@ -45,6 +46,8 @@ class WindowsSpeech:
         self._ready = threading.Event()
         self._thread: threading.Thread | None = None
         self._speech_deadline = 0.0
+        self._active_start_deadline: float | None = None
+        self.last_rejection_reason: str | None = None
 
     def _start(self) -> bool:
         if os.name != "nt":
@@ -113,24 +116,12 @@ class WindowsSpeech:
                 except queue.Empty:
                     command = None
                 if command is not None:
-                    action, text, event_id, generation = command
+                    action, text, event_id, generation, start_deadline = command
                     if action == "close":
                         voice.Speak("", 2)
                         break
                     if action == "speak":
-                        with self._lock:
-                            current = generation == self._generation and event_id in self._queued_ids
-                            self._queued_ids.discard(event_id)
-                            if current:
-                                self._active_id = event_id
-                                self._active_generation = generation
-                                self._started = False
-                                if voice.Status.RunningState != 2:  # SPRST_IS_SPEAKING
-                                    voice.Speak(text, 17)  # SVSFlagsAsync | SVSFPIsNotXML
-                                else:
-                                    self._emit(event_id, "error", "busy")
-                                    self._active_id = None
-                                    self.speaking = False
+                        self._start_command(voice, text, event_id, generation, start_deadline)
                 if not self._poll_status(voice):
                     break
         except Exception as exc:
@@ -145,6 +136,31 @@ class WindowsSpeech:
             if initialized:
                 pythoncom.CoUninitialize()
 
+    def _start_command(self, voice, text: str, event_id: str, generation: int,
+                       start_deadline: float | None) -> None:
+        with self._lock:
+            current = generation == self._generation and event_id in self._queued_ids
+            self._queued_ids.discard(event_id)
+            if not current:
+                return
+            state = voice.Status.RunningState
+            if start_deadline is not None and time.monotonic() >= start_deadline:
+                self._emit(event_id, "cancelled", "start_deadline")
+                self.speaking = False
+                return
+            self._active_id = event_id
+            self._active_generation = generation
+            self._active_start_deadline = start_deadline
+            self._started = False
+            self.speaking = True
+            if state != 2:  # SPRST_IS_SPEAKING
+                voice.Speak(text, 17)  # SVSFlagsAsync | SVSFPIsNotXML
+            else:
+                self._emit(event_id, "error", "busy")
+                self._active_id = None
+                self._active_start_deadline = None
+                self.speaking = False
+
     def _poll_status(self, voice) -> bool:
         try:
             state = voice.Status.RunningState
@@ -155,7 +171,15 @@ class WindowsSpeech:
             event_id = self._active_id
             generation = self._active_generation
             current = event_id is not None and generation == self._generation
-            if current and state == 2 and not self._started:
+            if (current and not self._started and self._active_start_deadline is not None
+                    and time.monotonic() >= self._active_start_deadline):
+                voice.Speak("", 2)
+                self._emit(event_id, "cancelled", "start_deadline")
+                self._active_id = None
+                self._active_generation = None
+                self._active_start_deadline = None
+                self.speaking = False
+            elif current and state == 2 and not self._started:
                 self._emit(event_id, "started")
                 self._started = True
                 self.speaking = True
@@ -163,6 +187,7 @@ class WindowsSpeech:
                 self._emit(event_id, "finished")
                 self._active_id = None
                 self._active_generation = None
+                self._active_start_deadline = None
                 self._started = False
                 self.speaking = False
             elif (current and not self._started
@@ -170,6 +195,7 @@ class WindowsSpeech:
                 self._emit(event_id, "error", "unconfirmed_timeout")
                 self._active_id = None
                 self._active_generation = None
+                self._active_start_deadline = None
                 self.speaking = False
         return True
 
@@ -182,6 +208,7 @@ class WindowsSpeech:
             queued_ids = set(self._queued_ids)
             self._active_id = None
             self._active_generation = None
+            self._active_start_deadline = None
             self._started = False
             self._queued_ids.clear()
             self.speaking = False
@@ -214,16 +241,23 @@ class WindowsSpeech:
             self._events.clear()
         return events
 
-    def speak(self, text: str, event_id: str | None = None) -> bool:
-        if not self._start():
-            return False
+    def speak(self, text: str, event_id: str | None = None,
+              *, start_deadline: float | None = None) -> bool:
         event_id = event_id or str(uuid.uuid4())
+        self.last_rejection_reason = None
+        started = self._start()
+        if start_deadline is not None and time.monotonic() >= start_deadline:
+            self.last_rejection_reason = "start_deadline"
+            self._emit(event_id, "cancelled", "start_deadline")
+            return False
+        if not started:
+            return False
         try:
             with self._lock:
                 if self.speaking or not self._queue.empty():
                     return False
                 generation = self._generation
-                self._queue.put_nowait(("speak", text, event_id, generation))
+                self._queue.put_nowait(("speak", text, event_id, generation, start_deadline))
                 self._queued_ids.add(event_id)
                 self.speaking = True
                 self._speech_deadline = time.monotonic() + max(1.0, len(text) / 15)
@@ -240,6 +274,7 @@ class WindowsSpeech:
                 ids.add(self._active_id)
             self._active_id = None
             self._active_generation = None
+            self._active_start_deadline = None
             self._started = False
             self.speaking = False
             self._purge.set()
@@ -256,7 +291,7 @@ class WindowsSpeech:
         thread = self._thread
         if thread is not None and thread.is_alive():
             try:
-                self._queue.put_nowait(("close", "", "", self._generation))
+                self._queue.put_nowait(("close", "", "", self._generation, None))
             except queue.Full:
                 pass
             thread.join(timeout=2.0)
@@ -293,8 +328,8 @@ class VoiceCoach:
         self._sample_context: dict = {"session_id": None, "time_s": None, "lap": None,
                                       "lap_dist_pct": None}
         self._abs_logged_suppression: set[str] = set()
-        self._navigation_lap = None
-        self._navigation_attempted: set[int] = set()
+        self._navigation_attempted: deque[str] = deque(maxlen=64)
+        self._active_navigation: dict | None = None
 
     @property
     def _error(self) -> str | None:
@@ -328,6 +363,7 @@ class VoiceCoach:
         self._abs_announced = False
         self._stable_since = None
         self._abs_logged_suppression.clear()
+        self._active_navigation = None
         if purge:
             self._speaker.purge()
 
@@ -379,16 +415,24 @@ class VoiceCoach:
             return False
         try:
             if isinstance(self._speaker, WindowsSpeech):
-                spoken = self._speaker.speak(message, event_id=event_id)
+                self._native_metadata[event_id] = base
+                deadline = time.monotonic() + 0.5 if kind.startswith("navigation_") else None
+                spoken = self._speaker.speak(message, event_id=event_id, start_deadline=deadline)
             else:
                 spoken = self._speaker.speak(message)
         except Exception as exc:
+            self._native_metadata.pop(event_id, None)
             if hasattr(self._speaker, "error"):
                 self._speaker.error = str(exc)
             self._record_attempt({**base, "stage": "error", "reason": "backend_error"})
             self._refresh_status()
             return False
         if not spoken:
+            if (isinstance(self._speaker, WindowsSpeech)
+                    and self._speaker.last_rejection_reason == "start_deadline"):
+                self._refresh_status()
+                return False  # The backend emits cancellation with the original metadata.
+            self._native_metadata.pop(event_id, None)
             reason = "backend_error" if self._error or not getattr(self._speaker, "available", True) else "busy"
             self._record_attempt({**base, "stage": "suppressed", "reason": reason}, dedupe_abs=True)
             self._refresh_status()
@@ -397,6 +441,8 @@ class VoiceCoach:
         if isinstance(self._speaker, WindowsSpeech):
             self._native_metadata[event_id] = base
         self.last_message = message
+        if not kind.startswith("navigation_"):
+            self._active_navigation = None
         self._last_message_kind = kind
         self._last_global_speech = now
         self._last_type_speech[kind] = now
@@ -474,31 +520,65 @@ class VoiceCoach:
                     and sample.steering_wheel_rad is not None
                     and abs(sample.steering_wheel_rad) < 0.1)
 
-    def _navigation_hint(self, sample, navigation) -> bool:
+    @staticmethod
+    def _navigation_context(sample, navigation) -> dict | None:
         if (not navigation or not navigation.get("voice_ready")
                 or navigation.get("session_id") != sample.session_id
                 or navigation.get("sample_time_s") != sample.time_s):
-            return False
-        token = navigation.get("lap_token")
-        if token is None:
-            return False
-        if token != self._navigation_lap:
-            self._navigation_lap = token
-            self._navigation_attempted.clear()
+            return None
         upcoming = navigation.get("next")
-        if (not upcoming or upcoming.get("seconds_ahead") is None
+        if (not upcoming or upcoming.get("numeric_guidance_ready") is not True
                 or upcoming.get("location_basis") != "official_map_estimate"
-                or not upcoming.get("corner_name") or not upcoming.get("cue")):
+                or not upcoming.get("corner_name") or not upcoming.get("cue")
+                or not isinstance(upcoming.get("occurrence_token"), str)
+                or not upcoming["occurrence_token"]):
+            return None
+        for field in ("seconds_ahead", "seconds_to_braking_start"):
+            value = upcoming.get(field)
+            if type(value) not in (int, float) or not isfinite(value) or value <= 0:
+                return None
+        return upcoming
+
+    def _cancel_outdated_navigation(self, sample, navigation) -> None:
+        active = self._active_navigation
+        if active is None:
+            return
+        upcoming = self._navigation_context(sample, navigation)
+        compatible = bool(
+            upcoming and upcoming["occurrence_token"] == active["occurrence_token"]
+            and upcoming["cue"] == active["cue"] and sample.session_id == active["session_id"]
+            and self._clock() < active["stop_at"]
+            and sample.brake is not None and sample.brake <= 0.05
+        )
+        if not compatible:
+            if self._speaking():
+                self._speaker.purge()
+            self._active_navigation = None
+
+    def _navigation_hint(self, sample, navigation) -> bool:
+        upcoming = self._navigation_context(sample, navigation)
+        if upcoming is None:
             return False
         zone = upcoming["id"]
-        if zone not in (1, 2, 3) or zone in self._navigation_attempted:
+        token = upcoming["occurrence_token"]
+        if zone not in (1, 2, 3) or token in self._navigation_attempted:
             return False
-        if not 4 <= upcoming["seconds_ahead"] <= 6:
+        if not 8 <= upcoming["seconds_to_braking_start"] <= 10:
+            return False
+        # Conservative speech budget, not a measured SAPI duration. The fixed lap anchor
+        # stays meaningful while spoken; current distance/speed/bias remain on the panel.
+        speech_budget = max(4.0, len(upcoming["cue"]) / 15 + 1.0)
+        if upcoming["seconds_to_braking_start"] < speech_budget:
             return False
         # ponytail: hasta tres curvas por vuelta; ampliar sólo tras probar la carga de voz.
         # Un aviso ocupado/omitido caduca aquí: nunca se reproduce tarde al llegar a la frenada.
-        self._navigation_attempted.add(zone)
-        self._say(f"navigation_{zone}", upcoming["cue"])
+        self._navigation_attempted.append(token)
+        stop_at = self._clock() + upcoming["seconds_to_braking_start"]
+        if self._say(f"navigation_{zone}", upcoming["cue"]):
+            self._active_navigation = {
+                "occurrence_token": token, "cue": upcoming["cue"], "session_id": sample.session_id,
+                "stop_at": stop_at,
+            }
         return True
 
     def update(self, sample, fresh: bool, navigation=None) -> None:
@@ -534,6 +614,7 @@ class VoiceCoach:
         self._silenced = False
         self._session = sample.session_id
         self._last_sample_time = sample.time_s
+        self._cancel_outdated_navigation(sample, navigation)
 
         stable = self._stable_zone(sample)
         if stable:

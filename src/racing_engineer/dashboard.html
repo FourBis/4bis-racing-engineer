@@ -54,7 +54,9 @@ details{margin-top:16px}summary{cursor:pointer;color:var(--muted);font-size:12px
   <div class="view-heading"><p class="eyebrow">Panel del piloto</p><p id="drivingState">Esperando telemetría</p></div>
   <div class="drive-grid">
     <section class="coach" id="coach" data-ready="false" aria-labelledby="coachCorner">
-      <p class="eyebrow">Próxima curva · guía personal</p><h2 id="coachCorner">Esperando pista</h2><p id="coachCue" class="coach-cue">La guía aparecerá cuando haya una curva identificada y una referencia observada.</p><p id="coachDistance" class="coach-distance">Sin indicación de frenada</p><p class="coach-note">Referencia observada y ubicación aproximada. Es una propuesta de práctica; tú adaptas la conducción al tráfico.</p>
+      <p class="eyebrow">Próxima curva · referencia personal</p><h2 id="coachCorner">Esperando pista</h2><p id="coachCue" class="coach-cue">La guía aparecerá cuando haya una curva identificada y una referencia observada.</p><p id="coachDistance" class="coach-distance">Sin indicación de frenada</p>
+      <p id="coachReference" class="section-note muted" hidden></p><p id="coachSpeed" class="section-note muted" hidden></p><p id="coachApproach" class="section-note muted" hidden></p><p id="coachBias" class="section-note muted" hidden></p>
+      <p class="coach-note">Solo para iRacing. El porcentaje es mando normalizado de freno, no fuerza física ni un objetivo óptimo. Los metros se anclan en meta o en la frenada observada; no identifican carteles ni la entrada de curva. Tú adaptas la conducción al tráfico.</p>
     </section>
     <section class="delta" aria-label="Diferencia frente a referencia personal">
       <h2 class="eyebrow">Frente a tu referencia</h2><strong id="driveDelta">—</strong><p id="deltaDetail">Sin vuelta comparable</p>
@@ -136,8 +138,52 @@ function render(s){renderDriving(s);renderRaceResults(s.summary?.race_results);s
 function renderVoice(s){const v=s.voice||{},fresh=s.mode!=='live'||s.fresh===true;$('voiceStatus').textContent=`${v.status||(!v.available?'Voz local no disponible':v.speaking?'Locutando':v.enabled?'Voz activada':'Voz silenciada')} · ${fresh?'estado del simulador reciente':'estado del simulador desactualizado'}`;$('voiceLast').textContent=`Último aviso: ${v.last_message||'sin avisos todavía'}`;const limits=Array.isArray(v.limitations)?v.limitations.slice(0,2).join(' · ')+(v.limitations.length>2?' · …':''):v.limitations||'Avisos solo con conexión reciente al simulador.';$('voiceLimits').textContent=limits;$('voiceToggle').textContent=v.enabled?'Silenciar voz':'Activar voz';$('voiceToggle').setAttribute('aria-pressed',String(!!v.enabled));$('voiceIndicator').textContent=v.available===false?'No disponible':v.speaking?'Hablando':v.enabled?'Activada':'Desactivada';$('voiceToggle').disabled=voiceBusy||(!v.enabled&&v.available===false);$('voiceTest').disabled=voiceBusy||v.available===false}
 function navPct(value){return typeof value==='number'&&Number.isFinite(value)?`${(value*100).toFixed(1)} %`:'Sin identificar en esta grabación'}
 function navDelta(value){if(typeof value!=='number'||!Number.isFinite(value))return'—';if(value>0)return`+${value.toFixed(2)} s · más lento`;if(value<0)return`${value.toFixed(2)} s · más rápido`;return'0.00 s · a la par'}
-function navigationCue(point){if(!point||point.location_basis!=='official_map_estimate'||!point.corner_name||!point.cue)return'Plan pendiente: falta confirmar la curva y la instrucción con el mapa oficial.';if(typeof point.reference_brake_peak!=='number'||!Number.isFinite(point.reference_brake_peak))return'Plan pendiente: el canal de freno no tiene una lectura observada.';const intensity=point.initial_brake_class;return`${point.cue} Intensidad observada: ${intensity||'sin clasificar'} (pico de señal normalizada ${num(point.reference_brake_peak,2)}/1).`}
-function renderNavigation(n,s,message=''){const missing='Sin identificar en esta grabación',track=n?.track||{},reference=n?.reference,zones=Array.isArray(n?.zones)?n.zones:[],fresh=s?.mode!=='live'||s?.fresh===true,live=s?.mode==='live',observedReference=reference?.basis==='fastest_observed_lap'||reference?.kind==='personal_observed';$('navigationStatus').textContent=message||(!n?'Guía de pista no disponible.':!fresh?'Telemetría desactualizada; navegación próxima pausada.':n.status||'Guía visual disponible.');$('navigationTrack').textContent=track.name||missing;$('navigationTrackDetail').textContent=`Layout: ${track.layout==null?missing:track.layout===''?'Trazado base':track.layout} · ${track.length_m==null?missing:`${num(track.length_m,0)} m`} · Auto: ${track.car||missing}`;$('navigationMapNote').textContent=n?.map_note||'La ubicación de cada marca se asocia a una curva solo cuando el mapa oficial permite estimarla.';$('navigationReference').textContent=observedReference?`Vuelta ${reference.lap??missing}`:'Sin referencia observada';$('navigationReferenceDetail').textContent=observedReference&&Number.isFinite(reference.time_s)?`${num(reference.time_s,3)} s observados · objetivo de frenada pendiente de validar.`:'No se presenta una vuelta objetivo validada.';$('navigationDelta').textContent=fresh?navDelta(n?.delta_s):'—';const comparison=n?.comparison,segment=comparison?.worst_segment;$('navigationComparison').textContent=comparison?`Última vuelta comparable ${comparison.lap??missing} · ${comparison.time_s==null?missing:`${num(comparison.time_s,3)} s`} · delta ${navDelta(comparison.delta_s)} · ${segment?`${segment.loss_s>0?'Mayor pérdida':'Diferencia'} en tramo ${navPct(segment.start_pct)}–${navPct(segment.end_pct)}: ${navDelta(segment.loss_s)}.`:'Sin tramo comparable.'}`:'Sin comparación disponible.';const next=n?.next,nextName=next?.location_basis==='official_map_estimate'&&next?.corner_name?next.corner_name:'Marca pendiente de identificar';$('navigationNext').textContent=fresh&&next?`Próximo punto: ${nextName} · ${navigationCue(next)} · ${next.distance_m==null?missing:`aprox. ${num(next.distance_m,0)} m hasta el inicio observado de frenada`}${next.seconds_ahead==null?'':` · aprox. ${num(next.seconds_ahead,1)} s adelante`} · ${navPct(next.lap_dist_pct)} de vuelta${next.reference_speed_kph==null?'':` · velocidad observada al iniciar la frenada: ${num(next.reference_speed_kph,1)} km/h (no es objetivo)`}.`:`Próximo punto: ${fresh?missing:'pausado por telemetría desactualizada'}.`;$('navigationZones').replaceChildren();for(const z of zones.slice(0,3)){const item=document.createElement('article');item.className='nav-zone';const title=document.createElement('strong');title.textContent=z.location_basis==='official_map_estimate'&&z.corner_name?z.corner_name:'Marca pendiente de identificar';const position=document.createElement('p');position.textContent=`${navPct(z.lap_dist_pct)} de vuelta${z.reference_speed_kph==null?'':` · velocidad observada al frenar: ${num(z.reference_speed_kph,1)} km/h`}`;const cue=document.createElement('p');cue.textContent=navigationCue(z);item.append(title,position,cue);$('navigationZones').append(item)}if(!zones.length){const item=document.createElement('span');item.className='nav-zone';item.textContent='Sin marcas de curva identificadas en esta grabación.';$('navigationZones').append(item)}if(live&&fresh&&n?.voice_ready===false&&n?.voice_reason){$('navigationStatus').textContent=`${n.status||'Guía visual disponible.'} ${n.voice_reason}`}}
+function identifiedCorner(point){return point?.location_basis==='official_map_estimate'&&!!point?.corner_name}
+function numericGuidanceReady(point){return identifiedCorner(point)&&point.numeric_guidance_ready===true&&!!point.cue}
+function navigationCue(point){
+  if(numericGuidanceReady(point))return point.cue;
+  return point?.guidance_reason||'Guía numérica en espera: falta una referencia comparable y una curva identificada.';
+}
+function brakingReference(point){
+  if(point?.reference_text)return `Referencia histórica · ${point.reference_text}`;
+  const peak=point?.reference_brake_peak_pct,start=point?.braking_start_m,parts=[];
+  if(Number.isFinite(peak)&&peak>=0&&peak<=100)parts.push(`pico de mando de freno ≈ ${num(peak,0)} %`);
+  if(start?.anchor==='start_finish_line'&&start.basis==='last_low_to_threshold'&&Number.isFinite(start.min)&&Number.isFinite(start.max)&&start.min>=0&&start.max>=start.min)parts.push(`inicio entre ${num(start.min,0)} y ${num(start.max,0)} m recorridos desde meta`);
+  return parts.length?`Referencia histórica · ${parts.join(' · ')}.`:'Referencia histórica sin porcentaje o punto de frenada comprobables.';
+}
+function speedReading(value){return Number.isFinite(value)&&value>=0?`${num(value,0)} km/h`:'sin dato'}
+function speedContext(point){return `Ahora (medida): ${speedReading(point?.current_speed_kph)} · referencia a esta misma posición (estimada): ${speedReading(point?.matched_reference_speed_kph)}.`}
+function approachContext(point){return `Antes de frenar, referencia observada: ${speedReading(point?.reference_approach_speed_kph)}.`}
+function biasReading(value,unit){
+  if(!Number.isFinite(value))return 'sin dato';
+  return typeof unit==='string'&&unit.trim()?`${num(value,1)} ${unit}`:`${num(value,1)} (unidad sin confirmar)`;
+}
+function biasContext(point){return `Brake bias · ajuste SDK actual: ${biasReading(point?.current_brake_bias,point?.current_brake_bias_unit)} · referencia: ${biasReading(point?.reference_brake_bias,point?.reference_brake_bias_unit)}.`}
+function guidanceDistance(point){return Number.isFinite(point?.distance_m)&&point.distance_m>=0?`Aprox. ${Math.round(point.distance_m/10)*10} m hasta el inicio observado de frenada`:'Sin distancia vigente hasta la frenada observada'}
+function renderNavigation(n,s,message=''){
+  const missing='Sin identificar en esta grabación',track=n?.track||{},reference=n?.reference,zones=Array.isArray(n?.zones)?n.zones:[],fresh=!s?.transportError&&(s?.mode!=='live'||(s?.connected===true&&s?.fresh===true))&&s?.running!==false,live=s?.mode==='live',observedReference=reference?.basis==='fastest_observed_lap'||reference?.kind==='personal_observed';
+  $('navigationStatus').textContent=message||(!n?'Guía de pista no disponible.':!fresh?'Telemetría no vigente; navegación próxima pausada.':n.status||'Guía visual disponible.');
+  $('navigationTrack').textContent=track.name||missing;
+  $('navigationTrackDetail').textContent=`Layout: ${track.layout==null?missing:track.layout===''?'Trazado base':track.layout} · ${track.length_m==null?missing:`${num(track.length_m,0)} m`} · Auto: ${track.car||missing}`;
+  $('navigationMapNote').textContent=n?.map_note||'La ubicación de cada marca se asocia a una curva solo cuando el mapa oficial permite estimarla.';
+  $('navigationReference').textContent=observedReference?`Vuelta ${reference.lap??missing}`:'Sin referencia observada';
+  $('navigationReferenceDetail').textContent=observedReference&&Number.isFinite(reference.time_s)?`${num(reference.time_s,3)} s observados · objetivo de frenada pendiente de validar.`:'No se presenta una vuelta objetivo validada.';
+  $('navigationDelta').textContent=fresh?navDelta(n?.delta_s):'-';
+  const comparison=n?.comparison,segment=comparison?.worst_segment;
+  $('navigationComparison').textContent=comparison?`Última vuelta comparable ${comparison.lap??missing} · ${comparison.time_s==null?missing:`${num(comparison.time_s,3)} s`} · delta ${navDelta(comparison.delta_s)} · ${segment?`${segment.loss_s>0?'Mayor pérdida':'Diferencia'} en tramo ${navPct(segment.start_pct)}-${navPct(segment.end_pct)}: ${navDelta(segment.loss_s)}.`:'Sin tramo comparable.'}`:'Sin comparación disponible.';
+  const next=n?.next,nextName=identifiedCorner(next)?next.corner_name:'Marca pendiente de identificar';
+  $('navigationNext').textContent=fresh&&next?`Próximo punto: ${nextName} · ${navigationCue(next)}${numericGuidanceReady(next)?` · ${guidanceDistance(next)}`:''} ${brakingReference(next)} ${speedContext(next)} ${approachContext(next)} ${biasContext(next)}`:`Próximo punto: ${fresh?missing:'pausado por telemetría no vigente'}.`;
+  $('navigationZones').replaceChildren();
+  for(const z of zones.slice(0,3)){
+    const item=document.createElement('article');item.className='nav-zone';
+    const title=document.createElement('strong');title.textContent=identifiedCorner(z)?z.corner_name:'Marca pendiente de identificar';
+    const position=document.createElement('p');position.textContent=brakingReference(z);
+    const context=document.createElement('p');context.textContent=`${approachContext(z)} Brake bias · ajuste SDK de referencia: ${biasReading(z.reference_brake_bias,z.reference_brake_bias_unit)}.`;
+    item.append(title,position,context);$('navigationZones').append(item);
+  }
+  if(!zones.length){const item=document.createElement('span');item.className='nav-zone';item.textContent='Sin marcas de curva identificadas en esta grabación.';$('navigationZones').append(item)}
+  if(live&&fresh&&n?.voice_ready===false&&n?.voice_reason)$('navigationStatus').textContent=`${n.status||'Guía visual disponible.'} ${n.voice_reason}`;
+}
 async function postVoice(payload){if(voiceBusy)return;voiceBusy=true;$('voiceError').textContent='';renderVoice(state);try{const r=await fetch('/api/voice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csrf:state.csrf,...payload})});if(!r.ok)throw Error(`HTTP ${r.status}`)}catch(e){$('voiceError').textContent='No se pudo cambiar el estado de voz local.'}finally{voiceBusy=false;renderVoice(state);poll()}}
 function num(n,d){return n==null||!Number.isFinite(Number(n))?'—':Number(n).toFixed(d)}
 function selectComparableLaps(laps){
@@ -387,11 +433,14 @@ function renderDriving(s){
   }
   const source=s.mode==='demo'?'Demo sintética':s.mode==='replay'?'Replay':'En vivo';
   $('drivingState').textContent=!visible?`${source} · ${s.running===false?'lectura finalizada':'sin telemetría reciente'}`:`${source} · ${s.mode==='live'&&last.is_replay===true?'replay del simulador':last.on_track===false?'fuera del auto':'datos disponibles'}`;
-  const next=n?.next,ready=visible&&next?.location_basis==='official_map_estimate'&&!!next?.corner_name&&!!next?.cue&&Number.isFinite(next?.reference_brake_peak);
+  const next=n?.next,hasPoint=visible&&!!next,ready=hasPoint&&numericGuidanceReady(next);
   $('coach').dataset.ready=String(ready);
-  $('coachCorner').textContent=ready?next.corner_name:!visible?'Esperando pista':reference?'Guía en espera':'Conoce tu vuelta';
-  $('coachCue').textContent=ready?next.cue:!visible?'Las indicaciones se pausaron. Revisa las trazas guardadas en Análisis.':reference?'No hay una próxima curva identificada en el horizonte de la guía.':'Completa una vuelta válida para preparar tu referencia personal.';
-  $('coachDistance').textContent=ready&&Number.isFinite(next.distance_m)?`Aprox. ${Math.round(next.distance_m)} m hasta la frenada observada`:'Sin indicación de frenada';
+  $('coachCorner').textContent=hasPoint&&identifiedCorner(next)?next.corner_name:!visible?'Esperando pista':reference?'Guía en espera':'Conoce tu vuelta';
+  $('coachCue').textContent=hasPoint?navigationCue(next):!visible?'Las indicaciones se pausaron. Revisa las trazas guardadas en Análisis.':reference?'No hay una próxima curva identificada en el horizonte de la guía.':'Completa una vuelta válida para preparar tu referencia personal.';
+  $('coachDistance').textContent=ready?guidanceDistance(next):'Sin indicación de frenada';
+  for(const [id,text] of [['coachReference',brakingReference(next)],['coachSpeed',speedContext(next)],['coachApproach',approachContext(next)],['coachBias',biasContext(next)]]){
+    $(id).hidden=!hasPoint;$(id).textContent=hasPoint?text:'';
+  }
   const delta=visible&&Number.isFinite(n?.delta_s)?n.delta_s:null;
   $('driveDelta').textContent=delta===null?'—':`${delta>0?'+':''}${delta.toFixed(2)} s`;
   $('driveDelta').dataset.trend=delta===null?'none':delta>0?'slower':delta<0?'faster':'equal';

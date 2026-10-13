@@ -65,19 +65,36 @@ Si una base tiene varias capturas, replay solicita `--recording-id ID`.
 - Servidor loopback con comprobaciones Host/Origin/CSRF para acciones locales.
 
 La guía aprende hasta tres frenadas de una vuelta completa válida observada en la
-misma sesión/auto/trazado. El mapa aproximado de Road Atlanta Full Course permite
-asociarlas a curvas 1, 5, 6, 7 y 10a. Ejemplo:
-**«Viene curva uno. Freno fuerte y suelta progresivo».**
+misma sesión/auto/trazado y con el mismo ajuste brake bias. El mapa aproximado de
+Road Atlanta Full Course permite asociarlas a curvas 1, 5, 6, 7 y 10a. Ejemplo
+producido por una prueba sintética (no es un objetivo para una vuelta real):
+**«Curva uno. Referencia: pico 80 por ciento; inicio entre 260 y 280 metros desde meta».**
 
-Fuerte/media/suave clasifica el pico normalizado observado (umbrales 0,65/0,35),
-no fuerza física ni una frenada óptima. «Soltar progresivo» es una propuesta de
-práctica. Un dato ausente durante el episodio descarta su pico. Sin mapa compatible
-o curva identificable, no se inventa un aviso numerado.
+El porcentaje es el pico de mando normalizado `Brake`, redondeado a 5 puntos
+porcentuales: no fuerza física, presión hidráulica ni presión inicial óptima.
+El intervalo de inicio va de la última muestra con freno ≤5% a la primera ≥15%,
+redondeado hacia afuera a decenas de metros recorridos desde la línea de meta.
+No representa un cartel de 100 m ni metros restantes hasta una curva o ápice.
+Un dato de freno ausente durante el episodio descarta su pico.
 
-Los avisos anticipan aproximadamente 4–6 segundos al inicio observado de frenada,
-calculados con distancia y velocidad actual. Requieren zona estable, datos frescos
-y voz activada en LIVE. Demo/replay no emiten consejos automáticos de conducción.
-Las posiciones deben comprobarse conduciendo.
+El panel separa velocidad actual medida, velocidad de referencia interpolada en
+esa misma posición y velocidad medida justo antes de la rampa de frenado de la
+referencia. Una diferencia mayor a 5 km/h o 5% (el mayor margen) suspende el
+consejo numérico; no calcula otra presión usando una fórmula universal. Un cambio
+de `dcBrakeBias`, de su unidad, auto, pista o sesión reinicia el aprendizaje.
+Sin bias disponible se conserva la referencia histórica, sin objetivo numérico.
+El ajuste SDK se muestra tal como llega, con su unidad si existe: no siempre es
+porcentaje delantero. Clima, neumáticos, combustible y resto del setup no se
+verifican; una coincidencia de velocidad/bias no demuestra condiciones iguales.
+
+Los avisos se intentan aproximadamente 8-10 segundos antes del extremo inicial
+de la frenada observada, usando distancia y velocidad actual. Requieren zona
+estable, datos de menos de 0,5 s, curva identificada y voz activada en LIVE. El
+arranque de una frase caduca a los 0,5 s; un cambio de contexto o llegada a la
+frenada la cancela. Una locución puede durar más de lo estimado: no es una orden
+de frenar en ese instante. Demo/replay no emiten consejos automáticos.
+Validar posiciones y audibilidad en el simulador; no usar como guía de carretera.
+Ver [criterios y límites de la referencia](docs/BRAKING_REFERENCE.md).
 
 El tráfico por sí solo no silencia la guía: el piloto adapta su ejecución. Un delta
 no demuestra un error de técnica. La guía objetivo validada y persistente por curva

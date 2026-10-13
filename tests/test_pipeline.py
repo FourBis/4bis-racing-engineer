@@ -50,9 +50,40 @@ class ModelAndStorageTests(unittest.TestCase):
         self.assertIsNone(sample.throttle_raw)
         self.assertIsNone(sample.vert_accel_mps2)
         self.assertIsNone(sample.on_pit_road)
+        self.assertIsNone(sample.brake_bias)
+        self.assertIsNone(sample.brake_bias_unit)
         for field, invalid in (("on_pit_road", 1), ("abs_active", 1), ("throttle_raw", -0.1), ("vert_accel_mps2", float("nan"))):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 Sample.from_dict({**old, field: invalid})
+
+    def test_brake_bias_persistence_keeps_raw_units_and_old_recordings_unknown(self):
+        samples = [Sample("iracing", "synthetic-bias", index, speed_mps=speed,
+                          brake_bias=bias, brake_bias_unit=unit)
+                   for index, (speed, bias, unit) in enumerate(
+                       ((40, 56.5, "%"), (50, -1.5, ""), (60, 0.565, "ratio"), (70, None, None)))]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bias.sqlite"
+            recorder = Recorder(path, "live")
+            for sample in samples:
+                recorder.write(sample)
+            recorder.close()
+            with closing(sqlite3.connect(path)) as db, db:
+                old = samples[-1].to_dict()
+                old.pop("brake_bias")
+                old.pop("brake_bias_unit")
+                db.execute("UPDATE samples SET payload=? WHERE seq=4", (json.dumps(old),))
+            before = path.read_bytes()
+            self.assertEqual(samples, list(load_replay(path)))
+            self.assertEqual(before, path.read_bytes())
+
+    def test_brake_bias_model_rejects_invalid_values_without_assuming_percentage_range(self):
+        for raw in (True, "56.5", float("nan"), float("inf")):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                Sample("demo", "fixture", 0, brake_bias=raw)
+        for unit in (True, 42, "x" * 33):
+            with self.subTest(unit=unit), self.assertRaises(ValueError):
+                Sample("demo", "fixture", 0, brake_bias=56.5, brake_bias_unit=unit)
+        self.assertEqual(-1.5, Sample("demo", "fixture", 0, brake_bias=-1.5).brake_bias)
 
     def test_missing_replay_does_not_create_file_and_multiple_runs_need_selection(self):
         with tempfile.TemporaryDirectory() as tmp:

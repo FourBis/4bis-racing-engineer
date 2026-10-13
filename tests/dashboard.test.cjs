@@ -93,7 +93,7 @@ function loadDashboard() {
   };
   // Solo se omite el polling inicial, para que evaluar el script no haga requests.
   const withoutInitialPoll = script.replace(/\bpoll\(\);\s*$/, '');
-  vm.runInNewContext(`${withoutInitialPoll}\nglobalThis.__dashboard = { pedalReading, selectComparableLaps, renderLaps, renderFindings, renderRaceResults, drawCompare, setView, renderDriving, frameAtTime, clockTime, selectCornerZone, showCornerZones, toggleCornerReplay, cornerReplaySnapshot: () => ({ time: cornerReviewState.time, playing: cornerReviewState.playing, selected: cornerReviewState.selected }), runAnimationFrame: timestamp => { const [id, callback] = animationFrames.entries().next().value || []; if (callback) { animationFrames.delete(id); callback(timestamp); } } };`, context);
+  vm.runInNewContext(`${withoutInitialPoll}\nglobalThis.__dashboard = { pedalReading, selectComparableLaps, renderLaps, renderFindings, renderRaceResults, drawCompare, setView, renderDriving, renderNavigation, frameAtTime, clockTime, selectCornerZone, showCornerZones, toggleCornerReplay, cornerReplaySnapshot: () => ({ time: cornerReviewState.time, playing: cornerReviewState.playing, selected: cornerReviewState.selected }), runAnimationFrame: timestamp => { const [id, callback] = animationFrames.entries().next().value || []; if (callback) { animationFrames.delete(id); callback(timestamp); } } };`, context);
   return {
     dashboard: context.__dashboard,
     get: getElementById,
@@ -121,6 +121,27 @@ function cornerResult(session = 'corner-session') {
         first: { lap: 6, duration_s: 10, frames: [[0, 0, 100, 10, 20], [10, 100, 200, 80, 90]] },
         second: { lap: 10, duration_s: 20, frames: [[0, 0, 90, 30, 40], [20, 100, 190, null, 80]] },
       },
+    },
+  };
+}
+
+function drivingReference(overrides = {}) {
+  const next = {
+    location_basis: 'official_map_estimate', corner_name: 'Curva 5',
+    cue: 'Referencia: pico de freno 80 %, inicio entre 1200 y 1220 m desde meta.',
+    reference_brake_peak_pct: 80,
+    braking_start_m: { min: 1200, max: 1220, anchor: 'start_finish_line', basis: 'last_low_to_threshold' },
+    reference_approach_speed_kph: 180, current_speed_kph: 200, matched_reference_speed_kph: 198,
+    reference_brake_bias: 54, reference_brake_bias_unit: '%', current_brake_bias: 54, current_brake_bias_unit: '%',
+    numeric_guidance_ready: true, guidance_reason: '', distance_m: 123,
+    ...overrides,
+  };
+  return {
+    mode: 'live', connected: true, fresh: true, running: true,
+    samples: [{ brake: 0.2, throttle: 0.94 }],
+    navigation: {
+      track: { name: 'Road Atlanta', car: 'GT4' }, delta_s: 0.4,
+      reference: { lap: 3, time_s: 94, basis: 'fastest_observed_lap' }, next, zones: [next],
     },
   };
 }
@@ -190,15 +211,7 @@ test('setView cambia panel y estado accesible sin solicitudes de red', () => {
 
 test('renderDriving borra pedales y avisos cuando LIVE está obsoleto, desconectado o finalizado', () => {
   const { dashboard, get } = loadDashboard();
-  const fresh = {
-    mode: 'live', connected: true, fresh: true, running: true,
-    samples: [{ brake: 0.2, throttle: 0.94 }],
-    navigation: {
-      track: { name: 'Road Atlanta', car: 'GT4' }, delta_s: 0.4,
-      reference: { lap: 3, time_s: 94 },
-      next: { location_basis: 'official_map_estimate', corner_name: 'Curva 5', cue: 'Frenar', reference_brake_peak: 0.8, distance_m: 120 },
-    },
-  };
+  const fresh = drivingReference();
   dashboard.renderDriving(fresh);
   assert.equal(get('brakeValue').textContent, '20');
   assert.equal(get('throttleValue').textContent, '94');
@@ -219,7 +232,87 @@ test('renderDriving borra pedales y avisos cuando LIVE está obsoleto, desconect
     assert.equal(get('coachCue').textContent, 'Las indicaciones se pausaron. Revisa las trazas guardadas en Análisis.');
     assert.equal(get('coachCorner').textContent, 'Esperando pista');
     assert.equal(get('coachDistance').textContent, 'Sin indicación de frenada');
+    for (const id of ['coachReference', 'coachSpeed', 'coachApproach', 'coachBias']) {
+      assert.equal(get(id).hidden, true);
+      assert.equal(get(id).textContent, '');
+    }
     assert.equal(get('driveDelta').textContent, '—');
+  }
+});
+
+test('renderDriving separa pico, intervalo desde meta, velocidad por posición y aproximación previa', () => {
+  const { dashboard, get } = loadDashboard();
+  const state = drivingReference();
+  dashboard.renderDriving(state);
+  assert.equal(get('coach').dataset.ready, 'true');
+  assert.equal(get('coachCue').textContent, state.navigation.next.cue);
+  assert.equal(get('coachDistance').textContent, 'Aprox. 120 m hasta el inicio observado de frenada');
+  assert.match(get('coachReference').textContent, /Referencia histórica · pico de mando de freno ≈ 80 %/);
+  assert.match(get('coachReference').textContent, /inicio entre 1200 y 1220 m recorridos desde meta/);
+  assert.match(get('coachSpeed').textContent, /Ahora \(medida\): 200 km\/h · referencia a esta misma posición \(estimada\): 198 km\/h/);
+  assert.equal(get('coachApproach').textContent, 'Antes de frenar, referencia observada: 180 km/h.');
+  assert.equal(get('coachBias').textContent, 'Brake bias · ajuste SDK actual: 54.0 % · referencia: 54.0 %.');
+  assert.match(html, /Solo para iRacing/);
+  assert.match(html, /no fuerza física ni un objetivo óptimo/);
+  assert.match(html, /no identifican carteles ni la entrada de curva/);
+});
+
+test('renderDriving conserva referencia histórica y motivo cuando velocidad o bias bloquean la guía', () => {
+  const { dashboard, get } = loadDashboard();
+  for (const overrides of [
+    { current_speed_kph: 230, guidance_reason: 'Velocidad diferente de la referencia.' },
+    { current_brake_bias: 57, guidance_reason: 'Brake bias diferente de la referencia.' },
+    { current_brake_bias: null, guidance_reason: 'Brake bias actual no disponible.' },
+  ]) {
+    const state = drivingReference({ ...overrides, numeric_guidance_ready: false, reference_text: 'Pico de mando de freno 80 %, inicio entre 1200 y 1220 m desde meta.' });
+    dashboard.renderDriving(state);
+    assert.equal(get('coach').dataset.ready, 'false');
+    assert.equal(get('coachCue').textContent, overrides.guidance_reason);
+    assert.equal(get('coachDistance').textContent, 'Sin indicación de frenada');
+    assert.match(get('coachReference').textContent, /^Referencia histórica · Pico de mando de freno 80 %/);
+    assert.equal(get('coachReference').hidden, false);
+    if (overrides.current_speed_kph) assert.match(get('coachSpeed').textContent, /230 km\/h/);
+  }
+  assert.match(get('coachBias').textContent, /actual: sin dato · referencia: 54.0 %/);
+});
+
+test('renderDriving conserva valores ausentes y unidades de bias sin inventar porcentajes ni anclas', () => {
+  const { dashboard, get } = loadDashboard();
+  const state = drivingReference({
+    reference_brake_peak_pct: null, braking_start_m: { min: 100, max: 110, anchor: 'unknown', basis: 'last_low_to_threshold' },
+    numeric_guidance_ready: false, guidance_reason: 'Referencia incompleta.',
+    current_speed_kph: null, matched_reference_speed_kph: NaN, reference_approach_speed_kph: undefined,
+    current_brake_bias: -3, current_brake_bias_unit: '', reference_brake_bias: null, reference_brake_bias_unit: null,
+  });
+  dashboard.renderDriving(state);
+  assert.equal(get('coachReference').textContent, 'Referencia histórica sin porcentaje o punto de frenada comprobables.');
+  assert.match(get('coachSpeed').textContent, /Ahora \(medida\): sin dato · referencia a esta misma posición \(estimada\): sin dato/);
+  assert.match(get('coachApproach').textContent, /sin dato/);
+  assert.equal(get('coachBias').textContent, 'Brake bias · ajuste SDK actual: -3.0 (unidad sin confirmar) · referencia: sin dato.');
+  assert.doesNotMatch(get('coachBias').textContent, /%|frontal/);
+  state.navigation.next.current_brake_bias_unit = 'clicks';
+  dashboard.renderDriving(state);
+  assert.match(get('coachBias').textContent, /actual: -3.0 clicks/);
+});
+
+test('renderNavigation separa las zonas históricas y borra el próximo punto cuando no hay datos vigentes', () => {
+  const { dashboard, get } = loadDashboard();
+  const state = drivingReference({ numeric_guidance_ready: false, guidance_reason: 'Velocidad diferente de la referencia.' });
+  dashboard.renderNavigation(state.navigation, state);
+  const nextText = get('navigationNext').textContent;
+  assert.match(nextText, /Velocidad diferente de la referencia/);
+  assert.match(nextText, /Referencia histórica/);
+  assert.match(nextText, /misma posición \(estimada\): 198 km\/h/);
+  assert.doesNotMatch(nextText, /120 m hasta/);
+  const zone = get('navigationZones').children[0];
+  assert.match(zone.children[1].textContent, /^Referencia histórica/);
+  assert.match(zone.children[2].textContent, /Antes de frenar, referencia observada: 180 km\/h/);
+  assert.doesNotMatch(zone.children.map(child => child.textContent).join(' '), /Ahora \(medida\)/);
+  for (const unavailable of [{ fresh: false }, { connected: false }, { running: false }, { transportError: true }]) {
+    dashboard.renderNavigation(state.navigation, { ...state, ...unavailable });
+    assert.equal(get('navigationNext').textContent, 'Próximo punto: pausado por telemetría no vigente.');
+    assert.equal(get('navigationDelta').textContent, '-');
+    assert.match(get('navigationZones').children[0].children[1].textContent, /^Referencia histórica/);
   }
 });
 
