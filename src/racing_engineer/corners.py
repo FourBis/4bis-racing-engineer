@@ -9,12 +9,18 @@ _ROAD_ATLANTA = (
     ("11", .908250), ("12", .966542),
 )
 _SPOKEN = {"1": "uno", "5": "cinco", "6": "seis", "7": "siete", "10a": "diez A"}
-_INTENSITY = {"fuerte": "fuerte", "media": "medio", "suave": "suave"}
 
 
 def _identify(point: dict, supported: bool) -> dict:
     result = {**point, "corner_name": None, "cue": None, "location_basis": "unknown",
-              "target_validated": False, "instruction_basis": "practice_proposal"}
+              "reference_text": None,
+              "target_validated": False, "instruction_basis": "observed_reference"}
+    peak, start = point.get("reference_brake_peak_pct"), point.get("braking_start_m")
+    if peak is not None and start is not None and start.get("anchor") == "start_finish_line":
+        result["reference_text"] = (
+            f"Referencia observada: pico de mando Brake ≈{peak}% (no fuerza física). "
+            f"Inicio registrado entre {start['min']} y {start['max']} m recorridos desde meta; "
+            "no es un cartel ni distancia hasta la curva.")
     progress = point.get("lap_dist_pct")
     if not supported or progress is None:
         return result
@@ -28,9 +34,9 @@ def _identify(point: dict, supported: bool) -> dict:
                 or (progress - previous) % 1 < .008):
             break
         result.update(corner_name=f"Curva {name}", location_basis="official_map_estimate")
-        intensity = _INTENSITY.get(point.get("initial_brake_class"))
-        if intensity and point.get("reference_brake_peak") is not None:
-            result["cue"] = f"Viene curva {_SPOKEN[name]}. Freno {intensity} y suelta progresivo."
+        if result["reference_text"] and point.get("numeric_guidance_ready") is True:
+            result["cue"] = (f"Curva {_SPOKEN[name]}. Referencia: pico {peak} por ciento; "
+                             f"inicio entre {start['min']} y {start['max']} metros desde meta.")
         break
     return result
 
@@ -45,9 +51,13 @@ def corner_guidance(navigation: dict) -> dict:
               "next": _identify(navigation["next"], supported) if navigation["next"] else None,
               "map_note": (
                   "Road Atlanta Full Course: nombres del mapa oficial; ubicaciones aproximadas, "
-                  "pendientes de comprobar conduciendo. Intensidad tomada de tu vuelta observada; "
-                  "soltar progresivo es una propuesta de práctica, no un objetivo validado."
+                  "pendientes de comprobar en el simulador. Porcentaje: pico de mando Brake observado, "
+                  "no presión física ni óptimo. Inicio: intervalo recorrido desde meta, no cartel. "
+                  "Clima, neumáticos, combustible y resto del setup no verificados; adaptar al tráfico."
                   if supported else "Sin mapa compatible identificado: faltan nombres de curvas para la guía de voz.")}
     if not result["next"] or not result["next"]["cue"]:
-        result.update(voice_ready=False, voice_reason="Guía de voz en espera de una curva identificada.")
+        result.update(voice_ready=False, voice_reason=(
+            result["next"].get("guidance_reason") if result["next"] and
+            result["next"].get("numeric_guidance_ready") is False else
+            "Guía de voz en espera de una curva identificada y referencia comparable."))
     return result

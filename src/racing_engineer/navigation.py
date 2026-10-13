@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import ceil, floor
 
 from .analysis import _Lap, _interpolate, _lap_groups
 from .model import Sample
@@ -26,6 +27,11 @@ class _Zone:
     time_s: float
     speed_mps: float
     strength: float
+    prior_progress: float
+    prior_speed_mps: float
+    onset_interval_s: float
+    brake_bias: float | None
+    brake_bias_unit: str | None
 
 
 class Navigator:
@@ -40,6 +46,7 @@ class Navigator:
         self._comparison: dict | None = None
         self._identity: tuple | None = None
         self._run = 0
+        self._lap_sequence = 0
         self._lap_start_time: float | None = None
         self._lap_valid = True
         self._lap_truncated = False
@@ -49,7 +56,8 @@ class Navigator:
     def update(self, sample: Sample) -> None:
         identity = (sample.source, sample.session_id, getattr(sample, "track_id", None),
                     getattr(sample, "track_config", None), getattr(sample, "car_id", None),
-                    getattr(sample, "track_length_m", None))
+                    getattr(sample, "track_length_m", None), sample.brake_bias,
+                    sample.brake_bias_unit)
         changed = self._identity is not None and identity != self._identity
         reversed_time = self._sample is not None and sample.time_s <= self._sample.time_s
         if changed or reversed_time:
@@ -77,7 +85,10 @@ class Navigator:
                 completed.start_time_s = self._lap_start_time
                 self._complete_lap(completed, completed.samples[-1].lap)
             self._lap_samples = [sample]
-            self._lap_start_time = previous.time_s + dt * (1 - old_progress) / (1 - old_progress + progress)
+            self._lap_sequence += 1
+            span = 1 - old_progress + progress
+            self._lap_start_time = (previous.time_s + dt * (1 - old_progress) / span
+                                    if span > 0 else previous.time_s)
             self._lap_valid = True
             self._lap_truncated = False
             self._lap_reason = ""
@@ -130,10 +141,7 @@ class Navigator:
                 "kind": "personal_observed",
                 "basis": "fastest_observed_lap", "target_validated": False,
             }),
-            "zones": [{"id": index, "lap_dist_pct": zone.progress,
-                       "reference_speed_kph": round(zone.speed_mps * 3.6, 1),
-                       "reference_brake_peak": zone.strength,
-                       "initial_brake_class": _brake_class(zone.strength)}
+            "zones": [self._zone_snapshot(index, zone, track["length_m"])
                       for index, zone in enumerate(self._zone_events, 1)],
             "next": next_zone,
             "delta_s": delta,
@@ -157,6 +165,7 @@ class Navigator:
         self._lap_truncated = False
         self._lap_reason = ""
         self._run += 1
+        self._lap_sequence = 0
 
     def _apply_sample_gates(self, sample: Sample, previous: Sample | None,
                             *, wrapped: bool = False) -> None:
@@ -164,6 +173,8 @@ class Navigator:
             self._invalidate("replay activo o desconocido")
         elif sample.on_track is not True:
             self._invalidate("fuera de pista o estado desconocido")
+        elif sample.on_pit_road is True:
+            self._invalidate("paso por boxes reportado")
         elif sample.lap_dist_pct is None:
             self._invalidate("progreso desconocido")
         elif sample.speed_mps is None or sample.speed_mps < _MIN_SPEED_MPS:
@@ -210,6 +221,7 @@ class Navigator:
         events: list[_Zone] = []
         first_brake = lap.samples[0].brake
         armed = first_brake is not None and first_brake <= _BRAKE_LOW
+        prior = lap.samples[0] if armed else None
         index = 1
         while index < len(lap.samples):
             sample = lap.samples[index]
@@ -220,6 +232,7 @@ class Navigator:
                 continue
             if brake <= _BRAKE_LOW:
                 armed = True
+                prior = sample
                 index += 1
                 continue
             if armed and brake >= _BRAKE_ON:
@@ -235,8 +248,14 @@ class Navigator:
                         break
                     peak = max(peak, value)
                     end += 1
-                if released and sample.lap_dist_pct is not None and sample.speed_mps is not None:
-                    events.append(_Zone(sample.lap_dist_pct, sample.time_s, sample.speed_mps, peak))
+                if (released and prior is not None and prior.lap_dist_pct is not None
+                        and prior.speed_mps is not None and sample.lap_dist_pct is not None
+                        and sample.speed_mps is not None
+                        and prior.lap_dist_pct <= sample.lap_dist_pct):
+                    events.append(_Zone(sample.lap_dist_pct, sample.time_s, sample.speed_mps, peak,
+                                        prior.lap_dist_pct, prior.speed_mps,
+                                        sample.time_s - prior.time_s,
+                                        sample.brake_bias, sample.brake_bias_unit))
                 armed = False
                 index = end
             else:
@@ -294,6 +313,60 @@ class Navigator:
                     sample.is_replay is False and sample.speed_mps is not None and
                     sample.speed_mps >= _MIN_SPEED_MPS and sample.lap_dist_pct is not None)
 
+    @staticmethod
+    def _zone_snapshot(index: int, zone: _Zone, length: float | None) -> dict:
+        # The bracket bounds the observed <=5% to >=15% transition, not an apex
+        # or a physical board. Round outwards, never imply centimetre precision.
+        start = (None if length is None else {
+            "min": floor(zone.prior_progress * length / 10) * 10,
+            "max": ceil(zone.progress * length / 10) * 10,
+            "anchor": "start_finish_line", "basis": "last_low_to_threshold",
+        })
+        return {"id": index, "lap_dist_pct": zone.progress,
+                "reference_speed_kph": round(zone.speed_mps * 3.6, 1),
+                "reference_approach_speed_kph": round(zone.prior_speed_mps * 3.6, 1),
+                "reference_brake_peak": zone.strength,
+                "reference_brake_peak_pct": round(zone.strength * 20) * 5,
+                "initial_brake_class": _brake_class(zone.strength),
+                "braking_start_m": start,
+                "onset_interval_s": round(zone.onset_interval_s, 3),
+                "reference_brake_bias": zone.brake_bias,
+                "reference_brake_bias_unit": zone.brake_bias_unit,
+                "brake_bias_basis": "sdk_adjustment",
+                "confidence": "limited",
+                "conditions_verified": False,
+                "limitations": "Referencia observada del simulador, no óptima. Clima, neumáticos, "
+                               "combustible y resto del setup no se verifican; adaptar al tráfico."}
+
+    def _guidance_context(self, zone: _Zone, point: dict) -> dict:
+        sample = self._sample
+        matched = _interpolate(self._reference, sample.lap_dist_pct, "speed_mps")
+        reason = None
+        start = point["braking_start_m"]
+        if (sample.track_id is None or sample.track_config is None or sample.car_id is None):
+            reason = "Falta identidad de auto, pista o trazado para comparar la referencia."
+        elif start is None:
+            reason = "Falta longitud de pista para ubicar la frenada en metros desde meta."
+        elif zone.onset_interval_s > _MAX_GAP_S or start["max"] - start["min"] > 50:
+            reason = "Inicio de frenada poco acotado; revisar la referencia sin objetivo numérico."
+        elif sample.brake_bias is None or zone.brake_bias is None:
+            reason = "Brake bias no disponible; referencia histórica sin objetivo numérico."
+        elif (sample.brake_bias, sample.brake_bias_unit) != (zone.brake_bias, zone.brake_bias_unit):
+            reason = "Brake bias diferente; completar una nueva vuelta de referencia."
+        elif matched is None or sample.speed_mps is None:
+            reason = "Sin velocidad de referencia en esta posición."
+        # This is a conservative similarity gate, not a braking-distance model.
+        elif abs(sample.speed_mps - matched) > max(5 / 3.6, matched * .05):
+            reason = "Velocidad distinta a la referencia en esta posición; sin objetivo numérico."
+        elif sample.brake is None or sample.brake > _BRAKE_LOW:
+            reason = "Frenada ya iniciada o pedal desconocido; sin indicación anticipada."
+        return {"current_speed_kph": round(sample.speed_mps * 3.6, 1) if sample.speed_mps is not None else None,
+                "matched_reference_speed_kph": round(matched * 3.6, 1) if matched is not None else None,
+                "current_brake_bias": sample.brake_bias,
+                "current_brake_bias_unit": sample.brake_bias_unit,
+                "numeric_guidance_ready": reason is None,
+                "guidance_reason": reason or "Velocidad y ajuste brake bias compatibles; referencia observada, no objetivo validado."}
+
     def _next_zone(self, track: dict) -> dict | None:
         sample = self._sample
         if sample is None or sample.lap_dist_pct is None:
@@ -311,12 +384,19 @@ class Navigator:
             if seconds is not None and seconds > _NEXT_HORIZON_S:
                 continue
             # ponytail: 30 s horizon avoids announcing next-lap zones early; upgrade with map-aware approach windows.
-            options.append((forward, {"id": index, "lap_dist_pct": pct,
+            point = self._zone_snapshot(index, zone, length)
+            point.update(self._guidance_context(zone, point))
+            # Time to the earlier edge of the bracket, using constant current
+            # speed only. This is an estimate for expiry, not a braking command.
+            distance_to_start = (distance - (zone.progress - zone.prior_progress) * length
+                                 if distance is not None and length is not None else None)
+            options.append((forward, {**point,
                                       "distance_m": round(distance, 1) if distance is not None else None,
+                                      "distance_basis": "forward_to_observed_braking_threshold",
                                       "seconds_ahead": round(seconds, 2) if seconds is not None else None,
-                                      "reference_speed_kph": round(zone.speed_mps * 3.6, 1),
-                                      "reference_brake_peak": zone.strength,
-                                      "initial_brake_class": _brake_class(zone.strength)}))
+                                      "seconds_to_braking_start": (round(max(0, distance_to_start) / speed, 2)
+                                                                   if distance_to_start is not None and speed else None),
+                                      "occurrence_token": f"{self._run}:{self._lap_sequence + int(pct < sample.lap_dist_pct)}:{index}"}))
         return min(options, key=lambda item: item[0])[1] if options else None
 
     def _lap_token(self) -> str | None:

@@ -116,6 +116,65 @@ class IRacingSourceTests(unittest.TestCase):
         self.sdk.tick += 1
         self.assertIsNone(self.source.read().on_pit_road)
 
+    def test_brake_bias_preserves_raw_adjustment_and_live_unit_without_conversion(self):
+        self.assertIsNone(self.source.read().brake_bias)
+        self.sdk.var_headers_names.append("dcBrakeBias")
+        for raw, unit in ((56.5, "%"), (-1.5, ""), (0.565, "ratio"), (0, "clicks")):
+            with self.subTest(raw=raw, unit=unit):
+                self.sdk.values["dcBrakeBias"] = raw
+                self.sdk._var_headers_dict["dcBrakeBias"] = SimpleNamespace(unit=unit, desc="In car brake bias adjustment")
+                self.sdk.tick += 1
+                sample = self.source.read()
+                self.assertEqual(raw, sample.brake_bias)
+                self.assertEqual(unit, sample.brake_bias_unit)
+                self.assertEqual(0.4, sample.brake)
+                self.assertTrue(self.source.channels["dcBrakeBias"]["valid"])
+
+    def test_brake_bias_missing_header_preserves_raw_but_never_reuses_old_unit(self):
+        self.sdk.values["dcBrakeBias"] = 56.5
+        self.sdk.var_headers_names.append("dcBrakeBias")
+        self.sdk._var_headers_dict["dcBrakeBias"] = SimpleNamespace(unit="%")
+        self.assertEqual("%", self.source.read().brake_bias_unit)
+        self.sdk._var_headers_dict.pop("dcBrakeBias")
+        self.sdk.tick += 1
+        sample = self.source.read()
+        self.assertEqual(56.5, sample.brake_bias)
+        self.assertIsNone(sample.brake_bias_unit)
+        self.assertIn("sin confirmar", self.source.channels["dcBrakeBias"]["issue"])
+        for unit in (None, 123, "x" * 33):
+            with self.subTest(unit=unit):
+                self.sdk._var_headers_dict["dcBrakeBias"] = SimpleNamespace(unit=unit)
+                self.sdk.tick += 1
+                sample = self.source.read()
+                self.assertEqual(56.5, sample.brake_bias)
+                self.assertIsNone(sample.brake_bias_unit)
+
+    def test_brake_bias_invalid_or_absent_remains_unknown_without_reusing_value(self):
+        self.sdk.var_headers_names.append("dcBrakeBias")
+        self.sdk._var_headers_dict["dcBrakeBias"] = SimpleNamespace(unit="%")
+        for raw in (True, "56.5", float("nan"), float("inf"), None):
+            with self.subTest(raw=raw):
+                self.sdk.values["dcBrakeBias"] = raw
+                self.sdk.tick += 1
+                sample = self.source.read()
+                self.assertIsNone(sample.brake_bias)
+                self.assertIsNone(sample.brake_bias_unit)
+                self.assertFalse(self.source.channels["dcBrakeBias"]["valid"])
+        self.sdk.values["dcBrakeBias"] = 56.5
+        self.sdk.var_headers_names.remove("dcBrakeBias")
+        self.sdk.tick += 1
+        self.assertIsNone(self.source.read().brake_bias)
+
+    def test_brake_bias_without_any_headers_is_raw_with_unknown_unit(self):
+        self.sdk.values["dcBrakeBias"] = -0.5
+        self.sdk.var_headers_names = []
+        self.sdk._var_headers_dict = {}
+        sample = self.source.read()
+        self.assertEqual(-0.5, sample.brake_bias)
+        self.assertIsNone(sample.brake_bias_unit)
+        self.assertTrue(self.source.channels["dcBrakeBias"]["valid"])
+        self.assertIn("sin confirmar", self.source.channels["dcBrakeBias"]["issue"])
+
     def test_uses_driver_car_index_fallback_without_selecting_first_driver(self):
         self.sdk.values.pop("PlayerCarIdx")
         self.sdk.values["DriverInfo"]["DriverCarIdx"] = 2

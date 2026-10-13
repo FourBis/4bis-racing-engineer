@@ -8,7 +8,7 @@ from racing_engineer.navigation import Navigator
 def make_lap(start: float, duration: float, *, session="s1", speed=30.0,
              track=True, replay=False, incidents=0, damage="healthy",
              metadata=True, braking=True, lap_number=1, boundary_progress=0.0,
-             track_length_m=1000.0, source="demo"):
+             track_length_m=1000.0, source="demo", brake_bias=58.0, brake_bias_unit="%"):
     rows = []
     for i in range(101):
         pct = boundary_progress if i == 100 else i / 100
@@ -22,6 +22,7 @@ def make_lap(start: float, duration: float, *, session="s1", speed=30.0,
             lap=lap_number, lap_dist_pct=pct, speed_mps=speed, brake=brake,
             throttle=0.0, on_track=track, is_replay=replay, incidents=incidents,
             damage=damage,
+            brake_bias=brake_bias, brake_bias_unit=brake_bias_unit,
             track_id=1 if metadata else None, track_name="Circuit" if metadata else None,
             track_config="GP" if metadata else None,
             track_length_m=track_length_m if metadata else None,
@@ -57,8 +58,9 @@ class NavigationTests(unittest.TestCase):
         self.assertGreater(state["comparison"]["delta_s"], 0)
         self.assertIn(state["comparison"]["worst_segment"]["start_pct"], (0, 0.25, 0.5, 0.75))
         self.assertTrue(state["zones"])
-        self.assertTrue(all(set(zone) == {"id", "lap_dist_pct", "reference_speed_kph",
-                                          "reference_brake_peak", "initial_brake_class"}
+        self.assertTrue(all(set(zone) >= {"id", "lap_dist_pct", "reference_speed_kph",
+                                          "reference_brake_peak", "initial_brake_class", "braking_start_m",
+                                          "reference_approach_speed_kph", "reference_brake_bias"}
                             for zone in state["zones"]))
         self.assertIn("no óptima", state["status"])
 

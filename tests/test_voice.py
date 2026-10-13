@@ -5,6 +5,9 @@ from unittest.mock import patch
 from racing_engineer.voice import VoiceCoach, WindowsSpeech
 
 
+NUMERIC_CUE = "Curva uno. Referencia: pico 80 por ciento; inicio entre 260 y 280 metros desde meta."
+
+
 class FakeClock:
     def __init__(self):
         self.now = 0.0
@@ -153,7 +156,7 @@ class VoiceCoachTests(unittest.TestCase):
 
         queued_id = "queued-event"
         with backend._lock:
-            backend._queue.put_nowait(("speak", "texto", queued_id, backend._generation))
+            backend._queue.put_nowait(("speak", "texto", queued_id, backend._generation, None))
             backend._queued_ids.add(queued_id)
         backend.purge()
         cancelled = backend.drain_events()
@@ -183,7 +186,7 @@ class VoiceCoachTests(unittest.TestCase):
         backend._started = True
         backend._speech_deadline = 1000
         backend._queued_ids.add("queued-event")
-        backend._queue.put_nowait(("speak", "texto", "queued-event", backend._generation))
+        backend._queue.put_nowait(("speak", "texto", "queued-event", backend._generation, None))
 
         self.assertFalse(backend._poll_status(BrokenStatusVoice()))
         events = backend.drain_events()
@@ -193,6 +196,69 @@ class VoiceCoachTests(unittest.TestCase):
         self.assertFalse(backend.speaking)
         self.assertFalse(backend.available)
         self.assertIn("SAPI status failed", backend.error)
+
+    def test_navigation_start_deadline_expires_during_lazy_backend_start(self):
+        backend = WindowsSpeech()
+        coach = VoiceCoach("live", backend, self.clock)
+        coach._sample_context.update(session_id="reference-session", time_s=42)
+
+        def delayed_start():
+            self.clock.advance(1)
+            return True
+
+        with patch.object(backend, "_start", side_effect=delayed_start), \
+                patch("racing_engineer.voice.time.monotonic", self.clock):
+            self.assertFalse(coach._say("navigation_1", NUMERIC_CUE))
+        events = coach.drain_events()
+        self.assertEqual([("cancelled", "start_deadline")],
+                         [(event["stage"], event["reason"]) for event in events])
+        self.assertEqual(("reference-session", 42, "navigation_1"),
+                         (events[0]["session_id"], events[0]["time_s"], events[0]["cue"]))
+        self.assertTrue(backend._queue.empty())
+        self.assertFalse(backend.speaking)
+        self.assertEqual({}, coach._native_metadata)
+        coach.close()
+
+    def test_navigation_queued_command_expires_before_sapi_receives_text(self):
+        backend = WindowsSpeech()
+        calls = []
+        voice = SimpleNamespace(Status=SimpleNamespace(RunningState=1),
+                                Speak=lambda text, flags: calls.append((text, flags)))
+        with patch.object(backend, "_start", return_value=True), \
+                patch("racing_engineer.voice.time.monotonic", self.clock):
+            self.assertTrue(backend.speak(NUMERIC_CUE, "expired", start_deadline=.5))
+            command = backend._queue.get_nowait()
+            self.clock.advance(.6)
+            backend._start_command(voice, *command[1:])
+        self.assertEqual([], calls)
+        self.assertEqual([("expired", "cancelled", "start_deadline")],
+                         [(e["event_id"], e["stage"], e["reason"]) for e in backend.drain_events()])
+        self.assertFalse(backend.speaking)
+        self.assertEqual(set(), backend._queued_ids)
+        backend.close()
+
+    def test_navigation_unconfirmed_start_is_cancelled_but_timely_started_audio_can_finish(self):
+        for start_in_time in (False, True):
+            with self.subTest(start_in_time=start_in_time):
+                clock, backend, calls = FakeClock(), WindowsSpeech(), []
+                voice = SimpleNamespace(Status=SimpleNamespace(RunningState=1),
+                                        Speak=lambda text, flags: calls.append((text, flags)))
+                with patch.object(backend, "_start", return_value=True), \
+                        patch("racing_engineer.voice.time.monotonic", clock):
+                    self.assertTrue(backend.speak(NUMERIC_CUE, "event", start_deadline=.5))
+                    backend._start_command(voice, *backend._queue.get_nowait()[1:])
+                    if start_in_time:
+                        clock.advance(.1)
+                        voice.Status.RunningState = 2
+                        self.assertTrue(backend._poll_status(voice))
+                    clock.advance(1)
+                    voice.Status.RunningState = 1
+                    self.assertTrue(backend._poll_status(voice))
+                stages = [e["stage"] for e in backend.drain_events()]
+                self.assertEqual(["started", "finished"] if start_in_time else ["cancelled"], stages)
+                self.assertEqual([(NUMERIC_CUE, 17)] if start_in_time else [(NUMERIC_CUE, 17), ("", 2)], calls)
+                self.assertFalse(backend.speaking)
+                backend.close()
 
     def test_demo_replay_and_non_fresh_samples_never_trigger_driving_advice(self):
         for mode in ("demo", "replay"):
@@ -209,9 +275,11 @@ class VoiceCoachTests(unittest.TestCase):
     def navigation(self, time_s, **changes):
         return {"voice_ready": True, "session_id": "session-a", "sample_time_s": time_s,
                 "lap_token": "session-a:lap-1", "next": {
-                    "id": 1, "seconds_ahead": 5, "corner_name": "Curva 1",
+                    "id": 1, "seconds_ahead": 9, "seconds_to_braking_start": 8.8,
+                    "corner_name": "Curva 1", "numeric_guidance_ready": True,
+                    "occurrence_token": "run-1:lap-1:zone-1",
                     "location_basis": "official_map_estimate",
-                    "cue": "Viene curva uno. Freno fuerte y suelta progresivo."},
+                    "cue": NUMERIC_CUE},
                 **changes}
 
     def test_navigation_once_per_lap_with_anticipation_and_current_identity(self):
@@ -219,12 +287,16 @@ class VoiceCoachTests(unittest.TestCase):
         for i in range(20):
             t = i / 10
             self.coach.update(sample(t), True, self.navigation(t))
-        self.assertEqual("Viene curva uno. Freno fuerte y suelta progresivo.", self.speaker.messages[-1])
+        self.assertEqual(NUMERIC_CUE, self.speaker.messages[-1])
         self.assertEqual(2, len(self.speaker.messages))
         self.clock.advance(40)
         self.coach.update(sample(2), True, self.navigation(2))
         self.assertEqual(2, len(self.speaker.messages))
         self.coach.update(sample(2.1), True, self.navigation(2.1, lap_token="session-a:lap-2"))
+        self.assertEqual(2, len(self.speaker.messages))  # Same destination through the finish line.
+        nav = self.navigation(2.2, lap_token="session-a:lap-2")
+        nav["next"]["occurrence_token"] = "run-1:lap-2:zone-1"
+        self.coach.update(sample(2.2), True, nav)
         self.assertEqual(3, len(self.speaker.messages))
 
     def test_navigation_busy_attempt_expires_and_does_not_repeat(self):
@@ -239,11 +311,78 @@ class VoiceCoachTests(unittest.TestCase):
         self.coach.update(sample(1.2), True, self.navigation(1.2))
         self.assertEqual(1, len(self.speaker.messages))
 
+    def test_navigation_requires_early_window_and_time_to_finish_the_fixed_anchor(self):
+        cases = ({"seconds_to_braking_start": 7.9}, {"seconds_to_braking_start": 10.1},
+                 {"seconds_to_braking_start": 3}, {"seconds_to_braking_start": float("nan")},
+                 {"cue": NUMERIC_CUE * 3}, {"numeric_guidance_ready": False})
+        for change in cases:
+            with self.subTest(change=change):
+                speaker = FakeSpeaker()
+                coach = VoiceCoach("live", speaker, self.clock)
+                coach.enabled = True
+                for i in range(11):
+                    nav = self.navigation(i / 10)
+                    nav["next"].update(change)
+                    coach.update(sample(i / 10), True, nav)
+                self.assertEqual([], speaker.messages)
+                coach.close()
+
+    def test_navigation_window_uses_earliest_start_instead_of_later_threshold(self):
+        speaker = FakeSpeaker()
+        coach = VoiceCoach("live", speaker, self.clock)
+        coach.enabled = True
+        for i in range(11):
+            nav = self.navigation(i / 10)
+            nav["next"].update(seconds_ahead=10.5, seconds_to_braking_start=9.5)
+            coach.update(sample(i / 10), True, nav)
+        self.assertEqual([NUMERIC_CUE], speaker.messages)
+        coach.close()
+
+    def test_navigation_cancels_on_incompatible_context_or_braking_and_does_not_retry(self):
+        changes = ("numeric", "not_ready", "session", "identity", "new_reference", "at_start",
+                   "braking", "stale", "elapsed")
+        for change in changes:
+            with self.subTest(change=change):
+                clock, speaker = FakeClock(), FakeSpeaker()
+                coach = VoiceCoach("live", speaker, clock)
+                coach.enabled = True
+                for i in range(11):
+                    coach.update(sample(i / 10), True, self.navigation(i / 10))
+                self.assertEqual([NUMERIC_CUE], speaker.messages)
+                speaker.speaking = True
+                nav, current, fresh = self.navigation(1.1), sample(1.1), True
+                if change == "numeric":
+                    nav["next"]["numeric_guidance_ready"] = False
+                elif change == "not_ready":
+                    nav["voice_ready"] = False
+                elif change == "session":
+                    nav["session_id"] = "other"
+                elif change == "identity":
+                    nav["next"]["occurrence_token"] = "new-run:lap-1:zone-1"
+                elif change == "new_reference":
+                    nav["next"]["cue"] = NUMERIC_CUE.replace("80", "65")
+                elif change == "at_start":
+                    nav["next"]["seconds_to_braking_start"] = 0
+                elif change == "braking":
+                    current = sample(1.1, brake=.1)
+                elif change == "stale":
+                    fresh = False
+                elif change == "elapsed":
+                    clock.advance(9)
+                coach.update(current, fresh, nav)
+                self.assertEqual(1, speaker.purges)
+                self.assertIsNone(coach._active_navigation)
+                self.assertEqual([NUMERIC_CUE], speaker.messages)
+                coach.update(sample(1.2), True, self.navigation(1.2))
+                self.assertEqual([NUMERIC_CUE], speaker.messages)
+                coach.close()
+
     def test_navigation_never_speaks_anonymous_or_unmapped_points(self):
         self.enable()
         for i in range(11):
             self.coach.update(sample(i / 10), True)
-        for i, field in enumerate(("corner_name", "cue", "location_basis")):
+        for i, field in enumerate(("corner_name", "cue", "location_basis", "numeric_guidance_ready",
+                                   "occurrence_token", "seconds_to_braking_start")):
             t = 1.1 + i / 10
             nav = self.navigation(t)
             nav["next"].pop(field)
@@ -254,7 +393,7 @@ class VoiceCoachTests(unittest.TestCase):
         self.enable()
         for i in range(11):
             self.coach.update(sample(i / 10), True, self.navigation(i / 10))
-        self.assertEqual("Viene curva uno. Freno fuerte y suelta progresivo.", self.speaker.messages[-1])
+        self.assertEqual(NUMERIC_CUE, self.speaker.messages[-1])
         self.speaker.speaking = True
         self.clock.advance(1)
         for i in range(5):

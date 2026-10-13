@@ -29,6 +29,7 @@ class NavigationAppTests(unittest.TestCase):
                 sample = replace(row, source="iracing", time_s=row.time_s * 3,
                                  lap_time_s=row.lap_time_s * 3, speed_mps=4056.9 / 90,
                                  steering_wheel_rad=0, brake=brake, track_id=127,
+                                 brake_bias=58.0, brake_bias_unit="%",
                                  track_name="Road Atlanta", track_config="Full Course",
                                  track_length_m=4056.9, car_id=119, car_name="Synthetic SDK fixture")
                 clock[0] = sample.time_s
@@ -40,9 +41,23 @@ class NavigationAppTests(unittest.TestCase):
             self.assertGreaterEqual(len(cues), 2)
             self.assertEqual(len(cues), len({(e["lap"], e["cue"]) for e in cues}))
             self.assertTrue(all(e["time_s"] >= 90 and not e["persisted"] for e in cues))
-            self.assertTrue(all("Viene curva" in e["message"] and "suelta progresivo" in e["message"] for e in cues))
+            self.assertTrue(all("Referencia: pico 80 por ciento" in e["message"] and
+                                "metros desde meta" in e["message"] for e in cues))
             self.assertEqual({"Curva 1", "Curva 6", "Curva 10a"},
                              {z["corner_name"] for z in app.navigation()["zones"]})
+            app.voice.close()
+
+    def test_navigation_pauses_after_half_second_without_removing_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = App("live", Path(tmp) / "unused.sqlite")
+            for sample in demo_samples():
+                app.add(replace(sample, source="iracing"))
+            app.connected = True
+            with patch("racing_engineer.app.time.monotonic", return_value=app.last_received_at + .6):
+                self.assertTrue(app.fresh())  # General status still has its two-second tolerance.
+                self.assertFalse(app.fresh(.5))
+                self.assertIsNone(app.navigation()["next"])
+                self.assertIsNotNone(app.navigation()["reference"])
             app.voice.close()
 
     def test_demo_collection_exports_learned_reference_without_driving_audio(self):

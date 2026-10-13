@@ -63,8 +63,8 @@ class App:
         except (OSError, ValueError, TypeError) as error:
             self.marker_error = f"No se pudieron leer las marcas: {error}"
 
-    def fresh(self):
-        return self.connected and self.last_received_at is not None and time.monotonic() - self.last_received_at <= 2
+    def fresh(self, max_age_s=2):
+        return self.connected and self.last_received_at is not None and time.monotonic() - self.last_received_at <= max_age_s
 
     def record(self, enabled):
         with self.lock:
@@ -170,7 +170,7 @@ class App:
     def navigation(self):
         with self.lock:
             result = corner_guidance(self.navigator.snapshot())
-            if self.mode == "live" and not self.fresh():
+            if self.mode == "live" and not self.fresh(0.5):
                 result = {**result, "next": None, "delta_s": None, "voice_ready": False,
                           "status": "Esperando telemetría en vivo reciente"}
             return result
@@ -301,7 +301,7 @@ def collect(app, source, stop, speed=1, seconds=0, realtime=True):
                     app.connected = source.connected
                 if sample is None:
                     with app.lock:
-                        if not app.fresh():
+                        if not app.fresh(0.5):
                             app.voice.update(None, fresh=False)
                         app.flush_voice_events()
                     stop.wait(0.1)
