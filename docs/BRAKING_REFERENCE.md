@@ -47,7 +47,8 @@ o no tiene liberación observada dentro de la vuelta se descarta.
   resto del setup, daños no reportados y tráfico pueden cambiar. `confidence`
   permanece `limited`, `conditions_verified` y `target_validated` son `False`.
   El tráfico no demuestra error ni obliga a seguir la referencia. Tras un cambio
-  conocido de condiciones se debe iniciar una nueva captura/sesión de la app.
+  conocido de condiciones se debe reiniciar la lectura de la app para descartar
+  la referencia. Detener/iniciar solo la grabación no reinicia el aprendizaje.
 
 ## Voz y latencia
 
